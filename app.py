@@ -26,7 +26,7 @@ def chat():
                 "Content-Type": "application/json"
             },
             json={
-                "model": "mistralai/mistral-7b-instruct:free",
+                "model": "google/gemma-3-4b-it:free",
                 "messages": [
                     {"role": "system", "content": "أنت مساعد ذكي ومفيد. أجب دائماً باللغة العربية بشكل واضح ومختصر."},
                     {"role": "user", "content": user_message}
@@ -37,7 +37,7 @@ def chat():
         reply = result["choices"][0]["message"]["content"]
         return jsonify({"reply": reply})
     except Exception as e:
-        return jsonify({"reply": "حدث خطأ، حاول مرة أخرى."}), 500
+        return jsonify({"reply": f"خطأ: {str(e)}"}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
