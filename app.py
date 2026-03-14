@@ -16,28 +16,36 @@ def chat():
     user_message = data.get("message", "")
 
     if not user_message:
-        return jsonify({"error": "رسالة فارغة"}), 400
+        return jsonify({"reply": "رسالة فارغة"}), 400
+
+    if not OPENROUTER_API_KEY:
+        return jsonify({"reply": "❌ API Key غير موجود في البيئة"})
 
     try:
         response = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://n-py.onrender.com",
+                "X-Title": "AI Chatbot"
             },
             json={
-                "model": "google/gemma-3-4b-it:free",
+                "model": "openai/gpt-3.5-turbo",
                 "messages": [
-                    {"role": "system", "content": "أنت مساعد ذكي ومفيد. أجب دائماً باللغة العربية بشكل واضح ومختصر."},
                     {"role": "user", "content": user_message}
                 ]
-            }
+            },
+            timeout=30
         )
         result = response.json()
-        reply = result["choices"][0]["message"]["content"]
-        return jsonify({"reply": reply})
+        if "choices" in result:
+            reply = result["choices"][0]["message"]["content"]
+            return jsonify({"reply": reply})
+        else:
+            return jsonify({"reply": f"❌ خطأ من API: {str(result)}"})
     except Exception as e:
-        return jsonify({"reply": f"خطأ: {str(e)}"}), 500
+        return jsonify({"reply": f"❌ خطأ: {str(e)}"})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
