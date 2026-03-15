@@ -1,0 +1,113 @@
+{% extends 'base.html' %}
+{% block title %}لوحة الإدارة - واصل{% endblock %}
+{% block extra_css %}
+<style>
+.stat-card { background:var(--bg3); border-radius:16px; padding:20px; text-align:center; border:1px solid var(--border); }
+.stat-num { font-size:2.5rem; font-weight:900; }
+table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+th { padding:10px; text-align:right; background:var(--bg3); color:var(--text2); }
+td { padding:10px; border-bottom:1px solid var(--border); }
+.tab-btn { padding:10px 20px; border:none; background:var(--bg3); color:var(--text2); cursor:pointer; border-radius:10px; font-family:'Tajawal',sans-serif; font-size:0.9rem; }
+.tab-btn.active { background:var(--accent); color:white; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="wide-container">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+    <h1 class="glow-text" style="font-size:1.8rem;">🛡️ لوحة الإدارة</h1>
+    <a href="/admin/logout" class="btn btn-danger btn-sm">خروج</a>
+  </div>
+
+  <!-- Stats -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px;">
+    <div class="stat-card"><div class="stat-num" style="color:var(--accent2);">{{stats.users}}</div><div style="color:var(--text2);">مستخدم</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--pink);">{{stats.posts}}</div><div style="color:var(--text2);">منشور</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--cyan);">{{stats.messages}}</div><div style="color:var(--text2);">رسالة</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:#f59e0b;">{{stats.likes}}</div><div style="color:var(--text2);">إعجاب</div></div>
+  </div>
+
+  <!-- Tabs -->
+  <div style="display:flex;gap:8px;margin-bottom:16px;">
+    <button class="tab-btn active" onclick="showTab('users')">👤 المستخدمون</button>
+    <button class="tab-btn" onclick="showTab('posts')">📝 المنشورات</button>
+    <button class="tab-btn" onclick="showTab('messages')">💬 الرسائل</button>
+  </div>
+
+  <!-- Users Tab -->
+  <div id="tab-users" class="card" style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>#</th><th>المستخدم</th><th>البريد</th><th>تاريخ التسجيل</th><th>الحالة</th><th>إجراء</th></tr></thead>
+      <tbody>
+      {% for u in users %}
+      <tr>
+        <td>{{u.id}}</td>
+        <td><strong>{{u.username}}</strong></td>
+        <td style="color:var(--text2);">{{u.email}}</td>
+        <td style="color:var(--text2);">{{u.created_at[:10]}}</td>
+        <td><span style="color:{% if u.is_banned %}#ef4444{% else %}#22c55e{% endif %};">{% if u.is_banned %}موقوف{% else %}نشط{% endif %}</span></td>
+        <td>
+          <form method="POST" action="/admin/ban/{{u.id}}" style="display:inline;">
+            <button type="submit" class="btn btn-sm {% if u.is_banned %}btn-outline{% else %}btn-danger{% endif %}">
+              {% if u.is_banned %}رفع الإيقاف{% else %}إيقاف{% endif %}
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Posts Tab -->
+  <div id="tab-posts" class="card" style="display:none;overflow-x:auto;">
+    <table>
+      <thead><tr><th>#</th><th>المستخدم</th><th>المحتوى</th><th>التاريخ</th><th>حذف</th></tr></thead>
+      <tbody>
+      {% for p in posts %}
+      <tr>
+        <td>{{p.id}}</td>
+        <td><strong>{{p.username}}</strong></td>
+        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{p.content}}</td>
+        <td style="color:var(--text2);">{{p.created_at[:10]}}</td>
+        <td>
+          <form method="POST" action="/admin/delete_post/{{p.id}}" onsubmit="return confirm('حذف؟')">
+            <button type="submit" class="btn btn-danger btn-sm">🗑️</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Messages Tab -->
+  <div id="tab-messages" class="card" style="display:none;overflow-x:auto;">
+    <table>
+      <thead><tr><th>#</th><th>المرسل</th><th>المستقبل</th><th>الرسالة</th><th>التاريخ</th></tr></thead>
+      <tbody>
+      {% for m in messages %}
+      <tr>
+        <td>{{m.id}}</td>
+        <td><strong>{{m.sender}}</strong></td>
+        <td><strong>{{m.receiver}}</strong></td>
+        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{m.content}}</td>
+        <td style="color:var(--text2);">{{m.created_at[:16]}}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function showTab(name) {
+  ['users','posts','messages'].forEach(t => {
+    document.getElementById('tab-'+t).style.display = t===name ? 'block' : 'none';
+  });
+  document.querySelectorAll('.tab-btn').forEach((b,i) => {
+    b.classList.toggle('active', ['users','posts','messages'][i]===name);
+  });
+}
+</script>
+{% endblock %}

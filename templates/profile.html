@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% block title %}{{user.username}} - واصل{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="card fade-up" style="text-align:center;padding:30px;">
+    <div class="avatar avatar-lg" style="margin:0 auto 12px;">{{user.avatar}}</div>
+    <h2 style="font-size:1.5rem;font-weight:900;">{{user.username}}</h2>
+    {% if user.bio %}<p style="color:var(--text2);margin-top:8px;">{{user.bio}}</p>{% endif %}
+    <div style="display:flex;justify-content:center;gap:30px;margin:16px 0;color:var(--text2);">
+      <div><strong style="color:var(--text);font-size:1.2rem;">{{posts|length}}</strong><br/><span style="font-size:0.8rem;">منشور</span></div>
+      <div><strong style="color:var(--text);font-size:1.2rem;">{{followers}}</strong><br/><span style="font-size:0.8rem;">متابع</span></div>
+      <div><strong style="color:var(--text);font-size:1.2rem;">{{following}}</strong><br/><span style="font-size:0.8rem;">يتابع</span></div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:center;">
+      {% if user.id == session.user_id %}
+        <a href="/edit_profile" class="btn btn-outline btn-sm">✏️ تعديل الملف</a>
+      {% else %}
+        <button class="btn btn-primary btn-sm" id="follow-btn" onclick="toggleFollow({{user.id}})">
+          {% if is_following %}✅ تتابعه{% else %}➕ متابعة{% endif %}
+        </button>
+        <a href="/messages/{{user.id}}" class="btn btn-outline btn-sm">💬 رسالة</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {% for post in posts %}
+  <div class="card fade-up">
+    <div class="post-header">
+      <div class="avatar">{{user.avatar}}</div>
+      <div class="post-meta">
+        <span class="post-username">{{user.username}}</span>
+        <div class="post-time">{{post.created_at[:16]}}</div>
+      </div>
+    </div>
+    <div class="post-content">{{post.content}}</div>
+    <div class="post-actions">
+      <button class="action-btn {% if post.user_liked %}liked{% endif %}" onclick="likePost({{post.id}}, this)">
+        ❤️ <span id="like-count-{{post.id}}">{{post.like_count}}</span>
+      </button>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function toggleFollow(userId) {
+  fetch('/follow/'+userId, {method:'POST'})
+    .then(r => r.json())
+    .then(data => {
+      const btn = document.getElementById('follow-btn');
+      btn.textContent = data.following ? '✅ تتابعه' : '➕ متابعة';
+    });
+}
+function likePost(postId, btn) {
+  fetch('/like/'+postId, {method:'POST'})
+    .then(r => r.json())
+    .then(data => {
+      btn.classList.toggle('liked', data.liked);
+      document.getElementById('like-count-'+postId).textContent = data.count;
+    });
+}
+</script>
+{% endblock %}

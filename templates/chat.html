@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block title %}محادثة مع {{other.username}}{% endblock %}
+{% block extra_css %}
+<style>
+.chat-box { height:60vh; overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding:16px; }
+.msg { max-width:75%; padding:10px 14px; border-radius:16px; font-size:0.9rem; line-height:1.5; }
+.msg-mine { background:linear-gradient(135deg,var(--accent),var(--accent2)); color:white; align-self:flex-end; border-bottom-left-radius:4px; }
+.msg-other { background:var(--bg3); color:var(--text); align-self:flex-start; border-bottom-right-radius:4px; }
+.msg-time { font-size:0.7rem; opacity:0.7; margin-top:4px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="card" style="padding:0;overflow:hidden;">
+    <!-- Header -->
+    <div style="padding:16px 20px;background:var(--bg3);display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border);">
+      <a href="/messages" style="color:var(--text2);">←</a>
+      <div class="avatar">{{other.avatar}}</div>
+      <strong>{{other.username}}</strong>
+    </div>
+    <!-- Messages -->
+    <div class="chat-box" id="chat-box">
+      {% for m in msgs %}
+      <div class="msg {% if m.sender_id == session.user_id %}msg-mine{% else %}msg-other{% endif %}">
+        {{m.content}}
+        <div class="msg-time">{{m.created_at[11:16]}}</div>
+      </div>
+      {% endfor %}
+    </div>
+    <!-- Input -->
+    <form method="POST" action="/send_message/{{other.id}}" style="padding:16px;border-top:1px solid var(--border);display:flex;gap:8px;">
+      <input name="content" class="input" placeholder="اكتب رسالة..." autocomplete="off" required/>
+      <button type="submit" class="btn btn-primary btn-sm">إرسال ➤</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const chatBox = document.getElementById('chat-box');
+chatBox.scrollTop = chatBox.scrollHeight;
+</script>
+{% endblock %}
