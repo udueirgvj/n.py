@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% block title %}معلومات الحساب - Clipn{% endblock %}
+{% block content %}
+<div class="container">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+    <a href="/help" style="color:var(--text2);text-decoration:none;font-size:1.3rem;">‹</a>
+    <h2 style="font-size:1.1rem;">📋 معلومات الحساب</h2>
+  </div>
+  <div class="card">
+    <div style="display:flex;flex-direction:column;gap:14px;">
+      <div class="settings-row" style="border:none;padding:10px 0;"><div class="settings-row-title">اسم المستخدم</div><span style="color:var(--accent2);">@{{user.username}}</span></div>
+      <div class="settings-row" style="border:none;padding:10px 0;border-top:1px solid var(--border);"><div class="settings-row-title">الاسم الشخصي</div><span>{{user.display_name or '-'}}</span></div>
+      <div class="settings-row" style="border:none;padding:10px 0;border-top:1px solid var(--border);"><div class="settings-row-title">البريد الإلكتروني</div><span style="color:var(--text2);">{{user.email}}</span></div>
+      <div class="settings-row" style="border:none;padding:10px 0;border-top:1px solid var(--border);"><div class="settings-row-title">تاريخ الميلاد</div><span style="color:var(--text2);">{{user.dob or 'غير محدد'}}</span></div>
+      <div class="settings-row" style="border:none;padding:10px 0;border-top:1px solid var(--border);"><div class="settings-row-title">تاريخ الإنشاء</div><span style="color:var(--text2);">{{user.created_at[:10]}}</span></div>
+      <div class="settings-row" style="border:none;padding:10px 0;border-top:1px solid var(--border);"><div class="settings-row-title">نوع الحساب</div><span>{% if user.is_private %}خاص 🔒{% else %}عام 🌐{% endif %}</span></div>
+      <div class="settings-row" style="border:none;padding:10px 0;border-top:1px solid var(--border);"><div class="settings-row-title">التحقق بخطوتين</div><span>{% if user.two_fa_enabled %}مفعّل ✅{% else %}غير مفعّل{% endif %}</span></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

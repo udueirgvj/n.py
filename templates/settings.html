@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+{% block title %}الإعدادات - Clipn{% endblock %}
+{% block content %}
+<div class="container">
+  <h2 style="margin-bottom:16px;font-size:1.2rem;">⚙️ الإعدادات</h2>
+
+  <div class="card" style="padding:0;overflow:hidden;">
+    <div class="section-title">الحساب</div>
+    <a href="/settings/profile" style="text-decoration:none;color:var(--text);">
+      <div class="settings-row">
+        <div class="settings-row-info"><div class="settings-row-title">👤 حسابي</div><div class="settings-row-desc">تعديل الملف الشخصي</div></div>
+        <span style="color:var(--text2);">›</span>
+      </div>
+    </a>
+    <a href="/settings/privacy" style="text-decoration:none;color:var(--text);">
+      <div class="settings-row">
+        <div class="settings-row-info"><div class="settings-row-title">🔒 الخصوصية</div><div class="settings-row-desc">إدارة خصوصية حسابك</div></div>
+        <span style="color:var(--text2);">›</span>
+      </div>
+    </a>
+    <a href="/settings/security" style="text-decoration:none;color:var(--text);">
+      <div class="settings-row">
+        <div class="settings-row-info"><div class="settings-row-title">🛡️ تنبيهات الأمان</div><div class="settings-row-desc">الجلسات والأمان</div></div>
+        <span style="color:var(--text2);">›</span>
+      </div>
+    </a>
+    <a href="/settings/notifications" style="text-decoration:none;color:var(--text);">
+      <div class="settings-row">
+        <div class="settings-row-info"><div class="settings-row-title">🔔 الشعارات</div><div class="settings-row-desc">إدارة الإشعارات</div></div>
+        <span style="color:var(--text2);">›</span>
+      </div>
+    </a>
+    <a href="/settings/audience" style="text-decoration:none;color:var(--text);">
+      <div class="settings-row">
+        <div class="settings-row-info"><div class="settings-row-title">👥 عناصر التحكم في الجمهور</div><div class="settings-row-desc">من يرى محتواك</div></div>
+        <span style="color:var(--text2);">›</span>
+      </div>
+    </a>
+    <a href="/settings/appearance" style="text-decoration:none;color:var(--text);">
+      <div class="settings-row">
+        <div class="settings-row-info"><div class="settings-row-title">🎨 المظهر</div><div class="settings-row-desc">فاتح أو داكن</div></div>
+        <span style="color:var(--text2);">›</span>
+      </div>
+    </a>
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden;">
+    <div class="section-title">المساعدة</div>
+    <a href="/help" style="text-decoration:none;color:var(--text);">
+      <div class="settings-row">
+        <div class="settings-row-info"><div class="settings-row-title">❓ مركز المساعدة</div></div>
+        <span style="color:var(--text2);">›</span>
+      </div>
+    </a>
+    <a href="/privacy-center" style="text-decoration:none;color:var(--text);">
+      <div class="settings-row">
+        <div class="settings-row-info"><div class="settings-row-title">🔐 مركز الخصوصية</div></div>
+        <span style="color:var(--text2);">›</span>
+      </div>
+    </a>
+    <a href="/support" style="text-decoration:none;color:var(--text);">
+      <div class="settings-row">
+        <div class="settings-row-info"><div class="settings-row-title">💬 الدعم الفني</div></div>
+        <span style="color:var(--text2);">›</span>
+      </div>
+    </a>
+    <a href="/settings/share-profile" style="text-decoration:none;color:var(--text);">
+      <div class="settings-row">
+        <div class="settings-row-info"><div class="settings-row-title">🔗 مشاركة الملف الشخصي</div></div>
+        <span style="color:var(--text2);">›</span>
+      </div>
+    </a>
+  </div>
+
+  <a href="/logout" class="btn btn-danger" style="width:100%;justify-content:center;margin-top:8px;">🚪 تسجيل الخروج</a>
+</div>
+{% endblock %}

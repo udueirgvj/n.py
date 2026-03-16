@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+{% block title %}الإشعارات - واصل{% endblock %}
+{% block content %}
+<div class="container">
+  <h2 style="margin-bottom:16px;" class="glow-text">🔔 الإشعارات</h2>
+  {% for n in notifs %}
+  <div class="card fade-up" style="{% if not n.is_read %}border-color:var(--accent);{% endif %}">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span>{{n.content}}</span>
+      <span style="color:var(--text2);font-size:0.8rem;">{{n.created_at[:16]}}</span>
+    </div>
+  </div>
+  {% else %}
+  <div class="card" style="text-align:center;color:var(--text2);padding:40px;">
+    <div style="font-size:3rem;margin-bottom:12px;">🔕</div>
+    لا توجد إشعارات
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

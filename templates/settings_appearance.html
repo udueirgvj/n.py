@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}المظهر - Clipn{% endblock %}
+{% block content %}
+<div class="container">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+    <a href="/settings" style="color:var(--text2);text-decoration:none;font-size:1.3rem;">‹</a>
+    <h2 style="font-size:1.1rem;">🎨 المظهر</h2>
+  </div>
+  <div class="card">
+    <p style="color:var(--text2);margin-bottom:16px;font-size:0.9rem;">اختر مظهر التطبيق</p>
+    <div style="display:flex;gap:12px;">
+      <form method="POST" action="/settings/appearance" style="flex:1;">
+        <input type="hidden" name="theme" value="dark"/>
+        <button type="submit" class="btn {% if session.get('theme','dark')=='dark' %}btn-primary{% else %}btn-outline{% endif %}" style="width:100%;justify-content:center;padding:20px;flex-direction:column;gap:8px;">
+          <span style="font-size:2rem;">🌙</span>
+          داكن
+        </button>
+      </form>
+      <form method="POST" action="/settings/appearance" style="flex:1;">
+        <input type="hidden" name="theme" value="light"/>
+        <button type="submit" class="btn {% if session.get('theme')=='light' %}btn-primary{% else %}btn-outline{% endif %}" style="width:100%;justify-content:center;padding:20px;flex-direction:column;gap:8px;">
+          <span style="font-size:2rem;">☀️</span>
+          فاتح
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
