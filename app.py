@@ -1,166 +1,77 @@
-
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 from flask_socketio import SocketIO, emit, join_room
-import sqlite3, bcrypt, os, uuid, base64
+import bcrypt, os, uuid, base64, requests as http
 from datetime import datetime
 from functools import wraps
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "clipn-secret-2024")
-app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024  # 2MB max
+app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024
 socketio = SocketIO(app, cors_allowed_origins="*")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin2024")
-DB = "clipn.db"
-CLIPN_OWNER_USERNAME = "Clipn"
 
-# ─── Jinja filter ────────────────────────────────────────────
+# â”€â”€â”€ Firebase Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+FB_URL = "https://tttrt-b8c5a-default-rtdb.asia-southeast1.firebasedatabase.app"
+FB_KEY = os.environ.get("FIREBASE_SECRET", "")  # Database secret key
+
+def fb_get(path):
+    url = f"{FB_URL}/{path}.json"
+    if FB_KEY: url += f"?auth={FB_KEY}"
+    r = http.get(url, timeout=10)
+    return r.json() if r.status_code == 200 else None
+
+def fb_set(path, data):
+    url = f"{FB_URL}/{path}.json"
+    if FB_KEY: url += f"?auth={FB_KEY}"
+    r = http.put(url, json=data, timeout=10)
+    return r.json()
+
+def fb_push(path, data):
+    url = f"{FB_URL}/{path}.json"
+    if FB_KEY: url += f"?auth={FB_KEY}"
+    r = http.post(url, json=data, timeout=10)
+    return r.json()
+
+def fb_update(path, data):
+    url = f"{FB_URL}/{path}.json"
+    if FB_KEY: url += f"?auth={FB_KEY}"
+    r = http.patch(url, json=data, timeout=10)
+    return r.json()
+
+def fb_delete(path):
+    url = f"{FB_URL}/{path}.json"
+    if FB_KEY: url += f"?auth={FB_KEY}"
+    http.delete(url, timeout=10)
+
+def fb_query(path, order_by=None, limit=50):
+    url = f"{FB_URL}/{path}.json"
+    params = {}
+    if FB_KEY: params['auth'] = FB_KEY
+    if order_by:
+        params['orderBy'] = f'"{order_by}"'
+        params['limitToLast'] = limit
+    r = http.get(url, params=params, timeout=10)
+    data = r.json() if r.status_code == 200 else None
+    if not data or not isinstance(data, dict): return []
+    items = []
+    for k, v in data.items():
+        if isinstance(v, dict):
+            v['_id'] = k
+            items.append(v)
+    return items
+
+# â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @app.template_filter('format_number')
 def format_number(n):
-    if n >= 1_000_000: return f"{n/1_000_000:.1f}M"
-    if n >= 1_000: return f"{n/1_000:.1f}K"
-    return str(n)
+    try:
+        n = int(n)
+        if n >= 1_000_000: return f"{n/1_000_000:.1f}M"
+        if n >= 1_000: return f"{n/1_000:.1f}K"
+        return str(n)
+    except: return str(n)
 
-def get_db():
-    conn = sqlite3.connect(DB)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def init_db():
-    with get_db() as db:
-        db.executescript("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            display_name TEXT,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            bio TEXT DEFAULT '',
-            avatar TEXT DEFAULT '😊',
-            photo_url TEXT DEFAULT '',
-            phone TEXT DEFAULT '',
-            dob TEXT DEFAULT '',
-            is_private INTEGER DEFAULT 0,
-            show_activity INTEGER DEFAULT 1,
-            is_banned INTEGER DEFAULT 0,
-            ban_until TEXT DEFAULT '',
-            is_verified INTEGER DEFAULT 0,
-            is_restricted INTEGER DEFAULT 0,
-            restrict_label TEXT DEFAULT '',
-            two_fa_enabled INTEGER DEFAULT 0,
-            two_fa_code TEXT DEFAULT '',
-            theme TEXT DEFAULT 'dark',
-            age_restriction TEXT DEFAULT 'all',
-            notif_likes INTEGER DEFAULT 1,
-            notif_follows INTEGER DEFAULT 1,
-            notif_visits INTEGER DEFAULT 1,
-            notif_reposts INTEGER DEFAULT 1,
-            notif_messages INTEGER DEFAULT 1,
-            notif_channels INTEGER DEFAULT 1,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS sessions (
-            id TEXT PRIMARY KEY,
-            user_id INTEGER NOT NULL,
-            device_name TEXT DEFAULT '',
-            location TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS posts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            channel_id INTEGER DEFAULT NULL,
-            content TEXT NOT NULL,
-            hashtags TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS likes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            post_id INTEGER NOT NULL,
-            UNIQUE(user_id, post_id)
-        );
-        CREATE TABLE IF NOT EXISTS comments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            post_id INTEGER NOT NULL,
-            content TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS follows (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            follower_id INTEGER NOT NULL,
-            following_id INTEGER NOT NULL,
-            UNIQUE(follower_id, following_id)
-        );
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sender_id INTEGER NOT NULL,
-            receiver_id INTEGER NOT NULL,
-            content TEXT NOT NULL,
-            is_read INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS notifications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            content TEXT NOT NULL,
-            is_read INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS stories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            content TEXT NOT NULL,
-            emoji TEXT DEFAULT '✨',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS channels (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            owner_id INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            username TEXT UNIQUE NOT NULL,
-            description TEXT DEFAULT '',
-            avatar TEXT DEFAULT '📡',
-            cover_url TEXT DEFAULT '',
-            is_verified INTEGER DEFAULT 0,
-            base_subscribers INTEGER DEFAULT 1,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS channel_subscriptions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            channel_id INTEGER NOT NULL,
-            UNIQUE(user_id, channel_id)
-        );
-        CREATE TABLE IF NOT EXISTS support_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            content TEXT NOT NULL,
-            is_from_user INTEGER DEFAULT 1,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """)
-
-def _create_clipn_channel():
-    with get_db() as db:
-        existing = db.execute("SELECT id FROM channels WHERE username=?", (CLIPN_OWNER_USERNAME,)).fetchone()
-        if not existing:
-            # Get or create admin user
-            admin = db.execute("SELECT id FROM users WHERE username=?", (CLIPN_OWNER_USERNAME,)).fetchone()
-            if not admin:
-                hashed = bcrypt.hashpw(b"clipn_admin_2024", bcrypt.gensalt()).decode()
-                db.execute("INSERT OR IGNORE INTO users (username,display_name,email,password,is_verified) VALUES (?,?,?,?,1)",
-                          (CLIPN_OWNER_USERNAME, "Clipn Official", "admin@clipn.com", hashed))
-                admin = db.execute("SELECT id FROM users WHERE username=?", (CLIPN_OWNER_USERNAME,)).fetchone()
-            if admin:
-                db.execute("""INSERT OR IGNORE INTO channels (owner_id,name,username,description,avatar,is_verified,base_subscribers)
-                              VALUES (?,?,?,?,?,1,789000)""",
-                          (admin['id'], 'Clipn', CLIPN_OWNER_USERNAME,
-                           'القناة الرسمية لتطبيق Clipn 🚀', '🌐'))
-
-
-init_db()
-_create_clipn_channel()
+def now():
+    return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
 def login_required(f):
     @wraps(f)
@@ -178,38 +89,80 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated
 
+def get_user_by_username(username):
+    users = fb_query('users')
+    for u in users:
+        if u.get('username') == username:
+            return u
+    return None
+
+def get_user_by_id(uid):
+    data = fb_get(f'users/{uid}')
+    if data:
+        data['_id'] = uid
+    return data
+
 def add_notif(user_id, content, notif_type=None):
-    """Add notification respecting user settings"""
-    if notif_type:
-        with get_db() as db:
-            user = db.execute(f"SELECT {notif_type} FROM users WHERE id=?", (user_id,)).fetchone()
-            if user and not user[notif_type]:
-                return  # User disabled this notification type
-    with get_db() as db:
-        db.execute("INSERT INTO notifications (user_id,content) VALUES (?,?)", (user_id, content))
+    user = get_user_by_id(user_id)
+    if notif_type and user:
+        if not user.get(notif_type, True):
+            return
+    fb_push(f'notifications/{user_id}', {
+        'content': content,
+        'is_read': False,
+        'created_at': now()
+    })
 
 def get_user_context():
     if 'user_id' not in session: return {}
-    with get_db() as db:
-        notif_count = db.execute("SELECT COUNT(*) FROM notifications WHERE user_id=? AND is_read=0", (session['user_id'],)).fetchone()[0]
-        unread_dm = db.execute("SELECT COUNT(*) FROM messages WHERE receiver_id=? AND is_read=0", (session['user_id'],)).fetchone()[0]
+    notifs = fb_get(f'notifications/{session["user_id"]}') or {}
+    notif_count = sum(1 for v in notifs.values() if isinstance(v, dict) and not v.get('is_read')) if isinstance(notifs, dict) else 0
+    msgs = fb_get(f'messages') or {}
+    unread_dm = 0
+    if isinstance(msgs, dict):
+        for conv_id, conv in msgs.items():
+            if isinstance(conv, dict):
+                for msg_id, msg in conv.items():
+                    if isinstance(msg, dict) and msg.get('receiver_id') == session['user_id'] and not msg.get('is_read'):
+                        unread_dm += 1
     return {'notif_count': notif_count, 'unread_dm': unread_dm}
 
-def save_photo(file_data, filename):
-    """Save photo as base64 data URL - optimized for free tier"""
+def save_photo(file_data):
     if not file_data or file_data.filename == '':
         return None
     try:
-        data = file_data.read(500000)  # max 500KB
+        data = file_data.read(1024 * 1024)  # 1MB max
         if not data or len(data) < 100: return None
-        ext = file_data.filename.rsplit(".", 1)[-1].lower() if "." in file_data.filename else "jpg"
-        mime = {"jpg":"jpeg","jpeg":"jpeg","png":"png","gif":"gif","webp":"webp"}.get(ext,"jpeg")
+        ext = file_data.filename.rsplit('.', 1)[-1].lower() if '.' in file_data.filename else 'jpg'
+        mime = {'jpg':'jpeg','jpeg':'jpeg','png':'png','gif':'gif','webp':'webp'}.get(ext,'jpeg')
         b64 = base64.b64encode(data).decode()
         return f"data:image/{mime};base64,{b64}"
-    except:
-        return None
+    except: return None
 
-# ─── Auth ────────────────────────────────────────────────────
+def ensure_clipn_channel():
+    channels = fb_query('channels')
+    for ch in channels:
+        if ch.get('username') == 'Clipn':
+            return
+    # Create Clipn official channel
+    fb_push('channels', {
+        'name': 'Clipn',
+        'username': 'Clipn',
+        'description': 'Ø§Ù„Ù‚Ù†Ø§Ø© Ø§Ù„Ø±Ø³Ù…ÙŠØ© Ù„ØªØ·Ø¨ÙŠÙ‚ Clipn ðŸš€',
+        'avatar': 'ðŸŒ',
+        'cover_url': '',
+        'is_verified': True,
+        'base_subscribers': 789000,
+        'owner_id': 'admin',
+        'created_at': now()
+    })
+
+# Initialize Clipn channel on startup
+try:
+    ensure_clipn_channel()
+except: pass
+
+# â”€â”€â”€ Auth â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @app.route('/register', methods=['GET','POST'])
 def register():
     if request.method == 'POST':
@@ -217,18 +170,43 @@ def register():
         display_name = request.form.get('display_name','').strip()
         email = request.form['email'].strip()
         password = request.form['password']
-        dob_day = request.form.get('dob_day','1')
-        dob_month = request.form.get('dob_month','يناير')
-        dob_year = request.form.get('dob_year','2000')
-        dob = f"{dob_day} {dob_month} {dob_year}"
+        dob = f"{request.form.get('dob_day','1')} {request.form.get('dob_month','ÙŠÙ†Ø§ÙŠØ±')} {request.form.get('dob_year','2000')}"
+
+        # Check username exists
+        existing = get_user_by_username(username)
+        if existing:
+            return render_template('register.html', error="Ø§Ø³Ù… Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… Ù…Ø³ØªØ®Ø¯Ù… Ù…Ø³Ø¨Ù‚Ø§Ù‹")
+
         hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-        try:
-            with get_db() as db:
-                db.execute("INSERT INTO users (username,display_name,email,password,dob) VALUES (?,?,?,?,?)",
-                          (username, display_name or username, email, hashed, dob))
-            return redirect(url_for('login'))
-        except:
-            return render_template('register.html', error="اسم المستخدم أو البريد مستخدم مسبقاً")
+        user_id = str(uuid.uuid4())
+        fb_set(f'users/{user_id}', {
+            'username': username,
+            'display_name': display_name or username,
+            'email': email,
+            'password': hashed,
+            'bio': '',
+            'avatar': 'ðŸ˜Š',
+            'photo_url': '',
+            'dob': dob,
+            'is_private': False,
+            'show_activity': True,
+            'is_banned': False,
+            'ban_until': '',
+            'is_verified': False,
+            'is_restricted': False,
+            'restrict_label': '',
+            'two_fa_enabled': False,
+            'two_fa_code': '',
+            'theme': 'dark',
+            'notif_likes': True,
+            'notif_follows': True,
+            'notif_visits': True,
+            'notif_reposts': True,
+            'notif_messages': True,
+            'notif_channels': True,
+            'created_at': now()
+        })
+        return redirect(url_for('login'))
     return render_template('register.html')
 
 @app.route('/login', methods=['GET','POST'])
@@ -237,37 +215,45 @@ def login():
         username = request.form['username'].strip()
         password = request.form['password']
         two_fa = request.form.get('two_fa_code','').strip()
-        with get_db() as db:
-            user = db.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
-        if user and bcrypt.checkpw(password.encode(), user['password'].encode()):
-            if user['is_banned']:
-                msg = f"حسابك موقوف حتى {user['ban_until']}" if user['ban_until'] else "حسابك موقوف"
-                return render_template('login.html', error=msg)
-            if user['two_fa_enabled'] and two_fa != user['two_fa_code']:
-                return render_template('login.html', error="رمز التحقق بخطوتين غير صحيح", show_2fa=True)
-            session['user_id'] = user['id']
-            session['username'] = user['username']
-            session['display_name'] = user['display_name']
-            session['avatar'] = user['avatar']
-            session['photo_url'] = user['photo_url']
-            session['theme'] = user['theme']
-            sess_id = str(uuid.uuid4())
-            session['session_id'] = sess_id
-            ua = request.headers.get('User-Agent','')
-            device = 'موبايل' if 'Mobile' in ua else 'كمبيوتر'
-            with get_db() as db:
-                db.execute("INSERT OR IGNORE INTO sessions (id,user_id,device_name) VALUES (?,?,?)",
-                          (sess_id, user['id'], device))
-            return redirect(url_for('home'))
-        return render_template('login.html', error="بيانات خاطئة")
+
+        user = get_user_by_username(username)
+        if not user:
+            return render_template('login.html', error="Ø¨ÙŠØ§Ù†Ø§Øª Ø®Ø§Ø·Ø¦Ø©")
+
+        if not bcrypt.checkpw(password.encode(), user['password'].encode()):
+            return render_template('login.html', error="Ø¨ÙŠØ§Ù†Ø§Øª Ø®Ø§Ø·Ø¦Ø©")
+
+        if user.get('is_banned'):
+            msg = f"Ø­Ø³Ø§Ø¨Ùƒ Ù…ÙˆÙ‚ÙˆÙ Ø­ØªÙ‰ {user.get('ban_until','')}" if user.get('ban_until') else "Ø­Ø³Ø§Ø¨Ùƒ Ù…ÙˆÙ‚ÙˆÙ"
+            return render_template('login.html', error=msg)
+
+        if user.get('two_fa_enabled') and two_fa != user.get('two_fa_code',''):
+            return render_template('login.html', error="Ø±Ù…Ø² Ø§Ù„ØªØ­Ù‚Ù‚ Ø¨Ø®Ø·ÙˆØªÙŠÙ† ØºÙŠØ± ØµØ­ÙŠØ­", show_2fa=True)
+
+        user_id = user['_id']
+        session['user_id'] = user_id
+        session['username'] = user['username']
+        session['display_name'] = user.get('display_name', username)
+        session['avatar'] = user.get('avatar', 'ðŸ˜Š')
+        session['photo_url'] = user.get('photo_url', '')
+        session['theme'] = user.get('theme', 'dark')
+
+        sess_id = str(uuid.uuid4())
+        session['session_id'] = sess_id
+        ua = request.headers.get('User-Agent','')
+        device = 'Ù…ÙˆØ¨Ø§ÙŠÙ„' if 'Mobile' in ua else 'ÙƒÙ…Ø¨ÙŠÙˆØªØ±'
+        fb_set(f'sessions/{user_id}/{sess_id}', {
+            'device_name': device,
+            'location': '',
+            'created_at': now()
+        })
+        return redirect(url_for('home'))
     return render_template('login.html')
 
 @app.route('/logout')
 def logout():
-    sess_id = session.get('session_id')
-    if sess_id:
-        with get_db() as db:
-            db.execute("DELETE FROM sessions WHERE id=?", (sess_id,))
+    if 'user_id' in session and 'session_id' in session:
+        fb_delete(f'sessions/{session["user_id"]}/{session["session_id"]}')
     session.clear()
     return redirect(url_for('login'))
 
@@ -276,38 +262,59 @@ def forgot_password():
     msg = None
     if request.method == 'POST':
         email = request.form.get('email','').strip()
-        with get_db() as db:
-            user = db.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+        users = fb_query('users')
+        user = next((u for u in users if u.get('email') == email), None)
         if user:
             parts = email.split('@')
-            masked = parts[0][:2] + '***' + '@' + parts[1]
-            msg = f"تم إرسال كلمة المرور إلى {masked}"
+            masked = parts[0][:2] + '***@' + parts[1]
+            msg = f"ØªÙ… Ø¥Ø±Ø³Ø§Ù„ ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ± Ø¥Ù„Ù‰ {masked}"
         else:
-            msg = "البريد غير موجود"
+            msg = "Ø§Ù„Ø¨Ø±ÙŠØ¯ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯"
     return render_template('forgot_password.html', msg=msg)
 
-# ─── Home ────────────────────────────────────────────────────
+# â”€â”€â”€ Home â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @app.route('/')
 @login_required
 def home():
-    with get_db() as db:
-        posts = db.execute("""
-            SELECT p.*, u.username, u.display_name, u.avatar, u.photo_url, u.is_verified, u.is_restricted, u.restrict_label,
-                   (SELECT COUNT(*) FROM likes WHERE post_id=p.id) as like_count,
-                   (SELECT COUNT(*) FROM comments WHERE post_id=p.id) as comment_count,
-                   (SELECT COUNT(*) FROM likes WHERE post_id=p.id AND user_id=?) as user_liked
-            FROM posts p JOIN users u ON p.user_id=u.id
-            WHERE p.channel_id IS NULL
-            ORDER BY p.created_at DESC LIMIT 50
-        """, (session['user_id'],)).fetchall()
-        stories = db.execute("""
-            SELECT s.*, u.username, u.avatar, u.photo_url FROM stories s
-            JOIN users u ON s.user_id=u.id ORDER BY s.created_at DESC LIMIT 20
-        """).fetchall()
+    posts_data = fb_query('posts')
+    posts_data.sort(key=lambda x: x.get('created_at',''), reverse=True)
+    posts_data = [p for p in posts_data if not p.get('channel_id')][:50]
+
+    # Add user info and like info to each post
+    posts = []
+    for p in posts_data:
+        u = get_user_by_id(p.get('user_id',''))
+        if u:
+            p['username'] = u.get('username','')
+            p['display_name'] = u.get('display_name', u.get('username',''))
+            p['avatar'] = u.get('avatar','ðŸ˜Š')
+            p['photo_url'] = u.get('photo_url','')
+            p['is_verified'] = u.get('is_verified', False)
+            p['is_restricted'] = u.get('is_restricted', False)
+            p['restrict_label'] = u.get('restrict_label','')
+        likes = fb_get(f'likes/{p["_id"]}') or {}
+        p['like_count'] = len(likes)
+        p['user_liked'] = session['user_id'] in likes
+        comments = fb_get(f'comments/{p["_id"]}') or {}
+        p['comment_count'] = len(comments) if isinstance(comments, dict) else 0
+        p['id'] = p['_id']
+        posts.append(p)
+
+    stories_data = fb_query('stories')
+    stories_data.sort(key=lambda x: x.get('created_at',''), reverse=True)
+    stories = []
+    for s in stories_data[:20]:
+        u = get_user_by_id(s.get('user_id',''))
+        if u:
+            s['username'] = u.get('username','')
+            s['avatar'] = u.get('avatar','ðŸ˜Š')
+            s['photo_url'] = u.get('photo_url','')
+        stories.append(s)
+
     ctx = get_user_context()
     return render_template('home.html', posts=posts, stories=stories, **ctx)
 
-# ─── Posts ───────────────────────────────────────────────────
+# â”€â”€â”€ Posts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @app.route('/post', methods=['POST'])
 @login_required
 def create_post():
@@ -315,256 +322,324 @@ def create_post():
     if content:
         import re
         tags = ' '.join(re.findall(r'#\w+', content))
-        with get_db() as db:
-            db.execute("INSERT INTO posts (user_id,content,hashtags) VALUES (?,?,?)", (session['user_id'], content, tags))
+        fb_push('posts', {
+            'user_id': session['user_id'],
+            'content': content,
+            'hashtags': tags,
+            'created_at': now()
+        })
     return redirect(url_for('home'))
 
-@app.route('/like/<int:post_id>', methods=['POST'])
+@app.route('/like/<post_id>', methods=['POST'])
 @login_required
 def like_post(post_id):
-    with get_db() as db:
-        ex = db.execute("SELECT * FROM likes WHERE user_id=? AND post_id=?", (session['user_id'], post_id)).fetchone()
-        if ex:
-            db.execute("DELETE FROM likes WHERE user_id=? AND post_id=?", (session['user_id'], post_id))
-            liked = False
-        else:
-            db.execute("INSERT INTO likes (user_id,post_id) VALUES (?,?)", (session['user_id'], post_id))
-            liked = True
-            p = db.execute("SELECT user_id FROM posts WHERE id=?", (post_id,)).fetchone()
-            if p and p['user_id'] != session['user_id']:
-                add_notif(p['user_id'], f"❤️ {session['username']} أعجب بمنشورك", 'notif_likes')
-        count = db.execute("SELECT COUNT(*) FROM likes WHERE post_id=?", (post_id,)).fetchone()[0]
-    return jsonify({"liked": liked, "count": count})
+    likes = fb_get(f'likes/{post_id}') or {}
+    uid = session['user_id']
+    if uid in likes:
+        fb_delete(f'likes/{post_id}/{uid}')
+        liked = False
+    else:
+        fb_set(f'likes/{post_id}/{uid}', True)
+        liked = True
+        post = fb_get(f'posts/{post_id}')
+        if post and post.get('user_id') != uid:
+            add_notif(post['user_id'], f"â¤ï¸ {session['display_name']} Ø£Ø¹Ø¬Ø¨ Ø¨Ù…Ù†Ø´ÙˆØ±Ùƒ", 'notif_likes')
+    likes = fb_get(f'likes/{post_id}') or {}
+    return jsonify({"liked": liked, "count": len(likes)})
 
-@app.route('/comment/<int:post_id>', methods=['POST'])
+@app.route('/comment/<post_id>', methods=['POST'])
 @login_required
 def comment(post_id):
     content = request.form['content'].strip()
     if content:
-        with get_db() as db:
-            db.execute("INSERT INTO comments (user_id,post_id,content) VALUES (?,?,?)", (session['user_id'], post_id, content))
-            p = db.execute("SELECT user_id FROM posts WHERE id=?", (post_id,)).fetchone()
-            if p and p['user_id'] != session['user_id']:
-                add_notif(p['user_id'], f"💬 {session['username']} علّق على منشورك", 'notif_likes')
+        fb_push(f'comments/{post_id}', {
+            'user_id': session['user_id'],
+            'content': content,
+            'created_at': now()
+        })
+        post = fb_get(f'posts/{post_id}')
+        if post and post.get('user_id') != session['user_id']:
+            add_notif(post['user_id'], f"ðŸ’¬ {session['display_name']} Ø¹Ù„Ù‘Ù‚ Ø¹Ù„Ù‰ Ù…Ù†Ø´ÙˆØ±Ùƒ", 'notif_likes')
     return redirect(url_for('home'))
 
-@app.route('/delete_post/<int:post_id>', methods=['POST'])
+@app.route('/delete_post/<post_id>', methods=['POST'])
 @login_required
 def delete_post(post_id):
-    with get_db() as db:
-        db.execute("DELETE FROM posts WHERE id=? AND user_id=?", (post_id, session['user_id']))
+    post = fb_get(f'posts/{post_id}')
+    if post and post.get('user_id') == session['user_id']:
+        fb_delete(f'posts/{post_id}')
     return redirect(url_for('home'))
 
 @app.route('/story', methods=['POST'])
 @login_required
 def create_story():
     content = request.form['content'].strip()
-    emoji = request.form.get('emoji','✨')
+    emoji = request.form.get('emoji','âœ¨')
     if content:
-        with get_db() as db:
-            db.execute("INSERT INTO stories (user_id,content,emoji) VALUES (?,?,?)", (session['user_id'], content, emoji))
+        fb_push('stories', {
+            'user_id': session['user_id'],
+            'content': content,
+            'emoji': emoji,
+            'created_at': now()
+        })
     return redirect(url_for('home'))
 
-# ─── Profile ─────────────────────────────────────────────────
+# â”€â”€â”€ Profile â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @app.route('/profile/<username>')
 @login_required
 def profile(username):
-    with get_db() as db:
-        user = db.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
-        if not user: return "مستخدم غير موجود", 404
-        posts = db.execute("""
-            SELECT p.*, u.username, u.display_name, u.avatar, u.photo_url, u.is_verified, u.is_restricted,
-                   (SELECT COUNT(*) FROM likes WHERE post_id=p.id) as like_count,
-                   (SELECT COUNT(*) FROM comments WHERE post_id=p.id) as comment_count,
-                   (SELECT COUNT(*) FROM likes WHERE post_id=p.id AND user_id=?) as user_liked
-            FROM posts p JOIN users u ON p.user_id=u.id
-            WHERE p.user_id=? AND p.channel_id IS NULL ORDER BY p.created_at DESC
-        """, (session['user_id'], user['id'])).fetchall()
-        followers = db.execute("SELECT COUNT(*) FROM follows WHERE following_id=?", (user['id'],)).fetchone()[0]
-        following_count = db.execute("SELECT COUNT(*) FROM follows WHERE follower_id=?", (user['id'],)).fetchone()[0]
-        is_following = db.execute("SELECT * FROM follows WHERE follower_id=? AND following_id=?", (session['user_id'], user['id'])).fetchone()
-        channels = db.execute("SELECT * FROM channels WHERE owner_id=?", (user['id'],)).fetchall()
+    user = get_user_by_username(username)
+    if not user: return "Ù…Ø³ØªØ®Ø¯Ù… ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯", 404
+    uid = user['_id']
+
+    posts_data = fb_query('posts')
+    posts = []
+    for p in posts_data:
+        if p.get('user_id') == uid and not p.get('channel_id'):
+            likes = fb_get(f'likes/{p["_id"]}') or {}
+            p['like_count'] = len(likes)
+            p['user_liked'] = session['user_id'] in likes
+            p['id'] = p['_id']
+            p['username'] = user.get('username','')
+            p['display_name'] = user.get('display_name','')
+            p['avatar'] = user.get('avatar','ðŸ˜Š')
+            p['photo_url'] = user.get('photo_url','')
+            p['is_verified'] = user.get('is_verified', False)
+            p['is_restricted'] = user.get('is_restricted', False)
+            posts.append(p)
+    posts.sort(key=lambda x: x.get('created_at',''), reverse=True)
+
+    follows_data = fb_get('follows') or {}
+    followers = sum(1 for v in follows_data.values() if isinstance(v,dict) and v.get('following_id') == uid)
+    following_count = sum(1 for v in follows_data.values() if isinstance(v,dict) and v.get('follower_id') == uid)
+    is_following = any(v.get('follower_id') == session['user_id'] and v.get('following_id') == uid
+                      for v in follows_data.values() if isinstance(v,dict))
+
+    channels_data = fb_query('channels')
+    channels = [ch for ch in channels_data if ch.get('owner_id') == uid]
+
     ctx = get_user_context()
     return render_template('profile.html', user=user, posts=posts, followers=followers,
                           following=following_count, is_following=is_following, channels=channels, **ctx)
 
-@app.route('/follow/<int:user_id>', methods=['POST'])
+@app.route('/follow/<user_id>', methods=['POST'])
 @login_required
 def follow(user_id):
-    if user_id == session['user_id']: return jsonify({"error": "لا يمكنك متابعة نفسك"})
-    with get_db() as db:
-        ex = db.execute("SELECT * FROM follows WHERE follower_id=? AND following_id=?", (session['user_id'], user_id)).fetchone()
-        if ex:
-            db.execute("DELETE FROM follows WHERE follower_id=? AND following_id=?", (session['user_id'], user_id))
-            following = False
-        else:
-            db.execute("INSERT INTO follows (follower_id,following_id) VALUES (?,?)", (session['user_id'], user_id))
-            following = True
-            add_notif(user_id, f"👤 {session['username']} بدأ متابعتك", 'notif_follows')
+    if user_id == session['user_id']:
+        return jsonify({"error": "Ù„Ø§ ÙŠÙ…ÙƒÙ†Ùƒ Ù…ØªØ§Ø¨Ø¹Ø© Ù†ÙØ³Ùƒ"})
+    follows = fb_get('follows') or {}
+    existing = None
+    for k, v in follows.items():
+        if isinstance(v,dict) and v.get('follower_id') == session['user_id'] and v.get('following_id') == user_id:
+            existing = k
+            break
+    if existing:
+        fb_delete(f'follows/{existing}')
+        following = False
+    else:
+        fb_push('follows', {'follower_id': session['user_id'], 'following_id': user_id, 'created_at': now()})
+        following = True
+        add_notif(user_id, f"ðŸ‘¤ {session['display_name']} Ø¨Ø¯Ø£ Ù…ØªØ§Ø¨Ø¹ØªÙƒ", 'notif_follows')
     return jsonify({"following": following})
 
-# ─── Search ──────────────────────────────────────────────────
+# â”€â”€â”€ Search â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @app.route('/search')
 @login_required
 def search():
-    q = request.args.get('q','').strip()
+    q = request.args.get('q','').strip().lower()
     users, posts, channels = [], [], []
     if q:
-        with get_db() as db:
-            users = db.execute("SELECT * FROM users WHERE username LIKE ? OR display_name LIKE ?", (f'%{q}%',f'%{q}%')).fetchall()
-            posts = db.execute("""
-                SELECT p.*, u.username, u.display_name, u.avatar, u.photo_url FROM posts p JOIN users u ON p.user_id=u.id
-                WHERE (p.content LIKE ? OR p.hashtags LIKE ?) AND p.channel_id IS NULL ORDER BY p.created_at DESC
-            """, (f'%{q}%',f'%{q}%')).fetchall()
-            channels = db.execute("SELECT * FROM channels WHERE name LIKE ? OR username LIKE ?", (f'%{q}%',f'%{q}%')).fetchall()
+        all_users = fb_query('users')
+        users = [u for u in all_users if q in u.get('username','').lower() or q in u.get('display_name','').lower()]
+        all_posts = fb_query('posts')
+        for p in all_posts:
+            if q in p.get('content','').lower() and not p.get('channel_id'):
+                u = get_user_by_id(p.get('user_id',''))
+                if u:
+                    p['username'] = u.get('username','')
+                    p['display_name'] = u.get('display_name','')
+                    p['avatar'] = u.get('avatar','ðŸ˜Š')
+                    p['photo_url'] = u.get('photo_url','')
+                posts.append(p)
+        all_channels = fb_query('channels')
+        channels = [ch for ch in all_channels if q in ch.get('name','').lower() or q in ch.get('username','').lower()]
     ctx = get_user_context()
     return render_template('search.html', users=users, posts=posts, channels=channels, q=q, **ctx)
 
-# ─── Notifications ───────────────────────────────────────────
+# â”€â”€â”€ Notifications â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @app.route('/notifications')
 @login_required
 def notifications():
-    with get_db() as db:
-        notifs = db.execute("SELECT * FROM notifications WHERE user_id=? ORDER BY created_at DESC", (session['user_id'],)).fetchall()
-        db.execute("UPDATE notifications SET is_read=1 WHERE user_id=?", (session['user_id'],))
+    notifs_data = fb_get(f'notifications/{session["user_id"]}') or {}
+    notifs = []
+    for k, v in notifs_data.items():
+        if isinstance(v, dict):
+            v['_id'] = k
+            notifs.append(v)
+    notifs.sort(key=lambda x: x.get('created_at',''), reverse=True)
+    # Mark all as read
+    for n in notifs:
+        if not n.get('is_read'):
+            fb_update(f'notifications/{session["user_id"]}/{n["_id"]}', {'is_read': True})
     ctx = get_user_context()
     return render_template('notifications.html', notifs=notifs, **ctx)
 
-# ─── Messages ────────────────────────────────────────────────
+# â”€â”€â”€ Messages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @app.route('/messages')
 @login_required
 def messages():
-    with get_db() as db:
-        convos = db.execute("""
-            SELECT DISTINCT u.id, u.username, u.display_name, u.avatar, u.photo_url,
-                   (SELECT content FROM messages WHERE (sender_id=? AND receiver_id=u.id) OR (sender_id=u.id AND receiver_id=?) ORDER BY created_at DESC LIMIT 1) as last_msg,
-                   (SELECT COUNT(*) FROM messages WHERE sender_id=u.id AND receiver_id=? AND is_read=0) as unread
-            FROM users u WHERE u.id IN (
-                SELECT CASE WHEN sender_id=? THEN receiver_id ELSE sender_id END
-                FROM messages WHERE sender_id=? OR receiver_id=?
-            ) AND u.id != ?
-        """, (session['user_id'],)*7).fetchall()
+    all_users = fb_query('users')
+    convos = []
+    for u in all_users:
+        if u['_id'] == session['user_id']: continue
+        conv_id = '_'.join(sorted([session['user_id'], u['_id']]))
+        msgs = fb_get(f'messages/{conv_id}') or {}
+        if msgs:
+            msg_list = [v for v in msgs.values() if isinstance(v,dict)]
+            msg_list.sort(key=lambda x: x.get('created_at',''))
+            last = msg_list[-1] if msg_list else None
+            unread = sum(1 for m in msg_list if m.get('receiver_id') == session['user_id'] and not m.get('is_read'))
+            convos.append({
+                'id': u['_id'],
+                'username': u.get('username',''),
+                'display_name': u.get('display_name', u.get('username','')),
+                'avatar': u.get('avatar','ðŸ˜Š'),
+                'photo_url': u.get('photo_url',''),
+                'last_msg': last.get('content','') if last else '',
+                'unread': unread
+            })
+    convos.sort(key=lambda x: x.get('last_msg',''), reverse=True)
     ctx = get_user_context()
     return render_template('messages.html', convos=convos, **ctx)
 
-@app.route('/messages/<int:user_id>')
+@app.route('/messages/<other_id>')
 @login_required
-def chat(user_id):
-    with get_db() as db:
-        other = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-        if not other: return "مستخدم غير موجود", 404
-        msgs = db.execute("""
-            SELECT m.*, u.username, u.display_name, u.avatar, u.photo_url FROM messages m
-            JOIN users u ON m.sender_id=u.id
-            WHERE (sender_id=? AND receiver_id=?) OR (sender_id=? AND receiver_id=?)
-            ORDER BY m.created_at ASC
-        """, (session['user_id'], user_id, user_id, session['user_id'])).fetchall()
-        db.execute("UPDATE messages SET is_read=1 WHERE sender_id=? AND receiver_id=?", (user_id, session['user_id']))
+def chat(other_id):
+    other = get_user_by_id(other_id)
+    if not other: return "Ù…Ø³ØªØ®Ø¯Ù… ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯", 404
+    conv_id = '_'.join(sorted([session['user_id'], other_id]))
+    msgs_data = fb_get(f'messages/{conv_id}') or {}
+    msgs = []
+    for k, v in msgs_data.items():
+        if isinstance(v, dict):
+            v['_id'] = k
+            v['sender_id_val'] = v.get('sender_id','')
+            msgs.append(v)
+    msgs.sort(key=lambda x: x.get('created_at',''))
+    # Mark as read
+    for m in msgs:
+        if m.get('receiver_id') == session['user_id'] and not m.get('is_read'):
+            fb_update(f'messages/{conv_id}/{m["_id"]}', {'is_read': True})
     ctx = get_user_context()
-    return render_template('chat.html', other=other, msgs=msgs, **ctx)
+    return render_template('chat.html', other=other, msgs=msgs, conv_id=conv_id, **ctx)
 
-@app.route('/send_message/<int:receiver_id>', methods=['POST'])
+@app.route('/send_message/<other_id>', methods=['POST'])
 @login_required
-def send_message(receiver_id):
+def send_message(other_id):
     content = request.form['content'].strip()
     if content:
-        with get_db() as db:
-            db.execute("INSERT INTO messages (sender_id,receiver_id,content) VALUES (?,?,?)", (session['user_id'], receiver_id, content))
-        add_notif(receiver_id, f"💬 رسالة جديدة من {session['username']}", 'notif_messages')
-    return redirect(url_for('chat', user_id=receiver_id))
+        conv_id = '_'.join(sorted([session['user_id'], other_id]))
+        fb_push(f'messages/{conv_id}', {
+            'sender_id': session['user_id'],
+            'receiver_id': other_id,
+            'content': content,
+            'is_read': False,
+            'created_at': now()
+        })
+        add_notif(other_id, f"ðŸ’¬ Ø±Ø³Ø§Ù„Ø© Ø¬Ø¯ÙŠØ¯Ø© Ù…Ù† {session['display_name']}", 'notif_messages')
+    return redirect(url_for('chat', other_id=other_id))
 
-# ─── Settings ────────────────────────────────────────────────
+# â”€â”€â”€ Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @app.route('/settings')
 @login_required
 def settings():
-    ctx = get_user_context()
-    return render_template('settings.html', **ctx)
+    return render_template('settings.html', **get_user_context())
 
 @app.route('/settings/profile', methods=['GET','POST'])
 @login_required
 def settings_profile():
-    with get_db() as db:
-        user = db.execute("SELECT * FROM users WHERE id=?", (session['user_id'],)).fetchone()
+    user = get_user_by_id(session['user_id'])
     success = error = None
     if request.method == 'POST':
         display_name = request.form.get('display_name','').strip()
         bio = request.form.get('bio','').strip()
-        avatar = request.form.get('avatar','😊').strip()
+        avatar = request.form.get('avatar','ðŸ˜Š').strip()
         new_username = request.form.get('username_edit','').strip().lstrip('@')
-        photo_url = user['photo_url']
-        # Handle photo upload
+        photo_url = user.get('photo_url','')
         try:
             if 'photo' in request.files:
-                photo = request.files['photo']
-                saved = save_photo(photo, f"user_{session['user_id']}")
-                if saved:
-                    photo_url = saved
-        except:
-            pass  # Keep existing photo if upload fails
-        try:
-            final_username = new_username if new_username else user['username']
-            with get_db() as db:
-                db.execute("UPDATE users SET display_name=?,bio=?,avatar=?,username=?,photo_url=? WHERE id=?",
-                          (display_name, bio, avatar, final_username, photo_url, session['user_id']))
-            session['display_name'] = display_name
-            session['avatar'] = avatar
+                saved = save_photo(request.files['photo'])
+                if saved: photo_url = saved
+        except: pass
+
+        update_data = {
+            'display_name': display_name or user.get('display_name',''),
+            'bio': bio,
+            'avatar': avatar or 'ðŸ˜Š',
+            'photo_url': photo_url
+        }
+        if new_username and new_username != user.get('username'):
+            existing = get_user_by_username(new_username)
+            if existing:
+                error = "Ø§Ø³Ù… Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… Ù…Ø³ØªØ®Ø¯Ù… Ù…Ø³Ø¨Ù‚Ø§Ù‹"
+            else:
+                update_data['username'] = new_username
+                session['username'] = new_username
+
+        if not error:
+            fb_update(f'users/{session["user_id"]}', update_data)
+            session['display_name'] = update_data['display_name']
+            session['avatar'] = update_data['avatar']
             session['photo_url'] = photo_url
-            if new_username: session['username'] = new_username
-            success = "تم حفظ التغييرات بنجاح ✅"
-            with get_db() as db:
-                user = db.execute("SELECT * FROM users WHERE id=?", (session['user_id'],)).fetchone()
-        except Exception as e:
-            error = "اسم المستخدم مستخدم مسبقاً"
-    ctx = get_user_context()
-    return render_template('settings_profile.html', user=user, success=success, error=error, **ctx)
+            success = "ØªÙ… Ø­ÙØ¸ Ø§Ù„ØªØºÙŠÙŠØ±Ø§Øª âœ…"
+            user = get_user_by_id(session['user_id'])
+
+    return render_template('settings_profile.html', user=user, success=success, error=error, **get_user_context())
 
 @app.route('/settings/privacy', methods=['GET'])
 @login_required
 def settings_privacy():
-    with get_db() as db:
-        user = db.execute("SELECT * FROM users WHERE id=?", (session['user_id'],)).fetchone()
-    ctx = get_user_context()
-    return render_template('settings_privacy.html', user=user, **ctx)
+    user = get_user_by_id(session['user_id'])
+    return render_template('settings_privacy.html', user=user, **get_user_context())
 
 @app.route('/settings/privacy/toggle', methods=['POST'])
 @login_required
 def toggle_private():
-    with get_db() as db:
-        user = db.execute("SELECT is_private FROM users WHERE id=?", (session['user_id'],)).fetchone()
-        db.execute("UPDATE users SET is_private=? WHERE id=?", (0 if user['is_private'] else 1, session['user_id']))
+    user = get_user_by_id(session['user_id'])
+    fb_update(f'users/{session["user_id"]}', {'is_private': not user.get('is_private', False)})
     return redirect(url_for('settings_privacy'))
 
 @app.route('/settings/privacy/activity', methods=['POST'])
 @login_required
 def toggle_activity():
-    with get_db() as db:
-        user = db.execute("SELECT show_activity FROM users WHERE id=?", (session['user_id'],)).fetchone()
-        db.execute("UPDATE users SET show_activity=? WHERE id=?", (0 if user['show_activity'] else 1, session['user_id']))
+    user = get_user_by_id(session['user_id'])
+    fb_update(f'users/{session["user_id"]}', {'show_activity': not user.get('show_activity', True)})
     return redirect(url_for('settings_privacy'))
 
 @app.route('/settings/security')
 @login_required
 def settings_security():
-    with get_db() as db:
-        user = db.execute("SELECT * FROM users WHERE id=?", (session['user_id'],)).fetchone()
-        sessions_list = db.execute("SELECT * FROM sessions WHERE user_id=? ORDER BY created_at DESC", (session['user_id'],)).fetchall()
-    ctx = get_user_context()
-    return render_template('settings_security.html', user=user, sessions=sessions_list, current_session_id=session.get('session_id'), **ctx)
+    user = get_user_by_id(session['user_id'])
+    sessions_data = fb_get(f'sessions/{session["user_id"]}') or {}
+    sessions_list = []
+    for k, v in sessions_data.items():
+        if isinstance(v, dict):
+            v['id'] = k
+            sessions_list.append(v)
+    return render_template('settings_security.html', user=user, sessions=sessions_list,
+                          current_session_id=session.get('session_id'), **get_user_context())
 
 @app.route('/settings/security/logout-session/<sess_id>', methods=['POST'])
 @login_required
 def logout_session(sess_id):
-    with get_db() as db:
-        db.execute("DELETE FROM sessions WHERE id=? AND user_id=?", (sess_id, session['user_id']))
+    fb_delete(f'sessions/{session["user_id"]}/{sess_id}')
     return redirect(url_for('settings_security'))
 
 @app.route('/settings/security/2fa', methods=['GET'])
 @login_required
 def settings_2fa():
-    with get_db() as db:
-        user = db.execute("SELECT * FROM users WHERE id=?", (session['user_id'],)).fetchone()
-    ctx = get_user_context()
-    return render_template('settings_2fa.html', user=user, **ctx)
+    user = get_user_by_id(session['user_id'])
+    return render_template('settings_2fa.html', user=user, **get_user_context())
 
 @app.route('/settings/security/2fa/enable', methods=['POST'])
 @login_required
@@ -572,22 +647,18 @@ def enable_2fa():
     code = request.form['two_fa_code'].strip()
     confirm = request.form['two_fa_confirm'].strip()
     if code != confirm:
-        with get_db() as db:
-            user = db.execute("SELECT * FROM users WHERE id=?", (session['user_id'],)).fetchone()
-        return render_template('settings_2fa.html', user=user, error="الرمزان غير متطابقان", **get_user_context())
-    with get_db() as db:
-        db.execute("UPDATE users SET two_fa_enabled=1,two_fa_code=? WHERE id=?", (code, session['user_id']))
+        user = get_user_by_id(session['user_id'])
+        return render_template('settings_2fa.html', user=user, error="Ø§Ù„Ø±Ù…Ø²Ø§Ù† ØºÙŠØ± Ù…ØªØ·Ø§Ø¨Ù‚Ø§Ù†", **get_user_context())
+    fb_update(f'users/{session["user_id"]}', {'two_fa_enabled': True, 'two_fa_code': code})
     return redirect(url_for('settings_2fa'))
 
 @app.route('/settings/security/2fa/disable', methods=['POST'])
 @login_required
 def disable_2fa():
     password = request.form['password']
-    with get_db() as db:
-        user = db.execute("SELECT * FROM users WHERE id=?", (session['user_id'],)).fetchone()
-    if bcrypt.checkpw(password.encode(), user['password'].encode()):
-        with get_db() as db:
-            db.execute("UPDATE users SET two_fa_enabled=0,two_fa_code='' WHERE id=?", (session['user_id'],))
+    user = get_user_by_id(session['user_id'])
+    if user and bcrypt.checkpw(password.encode(), user['password'].encode()):
+        fb_update(f'users/{session["user_id"]}', {'two_fa_enabled': False, 'two_fa_code': ''})
     return redirect(url_for('settings_2fa'))
 
 @app.route('/settings/appearance', methods=['GET','POST'])
@@ -595,49 +666,38 @@ def disable_2fa():
 def settings_appearance():
     if request.method == 'POST':
         theme = request.form.get('theme','dark')
-        with get_db() as db:
-            db.execute("UPDATE users SET theme=? WHERE id=?", (theme, session['user_id']))
+        fb_update(f'users/{session["user_id"]}', {'theme': theme})
         session['theme'] = theme
         return redirect(url_for('settings_appearance'))
-    ctx = get_user_context()
-    return render_template('settings_appearance.html', **ctx)
+    return render_template('settings_appearance.html', **get_user_context())
 
 @app.route('/settings/notifications', methods=['GET','POST'])
 @login_required
 def settings_notifications():
-    with get_db() as db:
-        user = db.execute("SELECT * FROM users WHERE id=?", (session['user_id'],)).fetchone()
+    user = get_user_by_id(session['user_id'])
     if request.method == 'POST':
         fields = ['notif_likes','notif_follows','notif_visits','notif_reposts','notif_messages','notif_channels']
-        for f in fields:
-            val = 1 if f in request.form else 0
-            with get_db() as db:
-                db.execute(f"UPDATE users SET {f}=? WHERE id=?", (val, session['user_id']))
+        update = {f: (f in request.form) for f in fields}
+        fb_update(f'users/{session["user_id"]}', update)
         return redirect(url_for('settings_notifications'))
-    ctx = get_user_context()
-    return render_template('settings_notifications.html', user=user, **ctx)
+    return render_template('settings_notifications.html', user=user, **get_user_context())
 
 @app.route('/settings/audience', methods=['GET','POST'])
 @login_required
 def settings_audience():
-    with get_db() as db:
-        user = db.execute("SELECT * FROM users WHERE id=?", (session['user_id'],)).fetchone()
+    user = get_user_by_id(session['user_id'])
     if request.method == 'POST':
-        restriction = request.form.get('age_restriction','all')
-        with get_db() as db:
-            db.execute("UPDATE users SET age_restriction=? WHERE id=?", (restriction, session['user_id']))
+        fb_update(f'users/{session["user_id"]}', {'age_restriction': request.form.get('age_restriction','all')})
         return redirect(url_for('settings_audience'))
-    ctx = get_user_context()
-    return render_template('settings_audience.html', user=user, **ctx)
+    return render_template('settings_audience.html', user=user, **get_user_context())
 
 @app.route('/settings/share-profile')
 @login_required
 def share_profile():
     link = f"https://n-py.onrender.com/profile/{session['username']}"
-    ctx = get_user_context()
-    return render_template('share_profile.html', link=link, **ctx)
+    return render_template('share_profile.html', link=link, **get_user_context())
 
-# ─── Help ────────────────────────────────────────────────────
+# â”€â”€â”€ Help & Support â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @app.route('/help')
 @login_required
 def help_center():
@@ -646,8 +706,7 @@ def help_center():
 @app.route('/help/account-info')
 @login_required
 def help_account_info():
-    with get_db() as db:
-        user = db.execute("SELECT * FROM users WHERE id=?", (session['user_id'],)).fetchone()
+    user = get_user_by_id(session['user_id'])
     return render_template('help_account_info.html', user=user, **get_user_context())
 
 @app.route('/help/hacked', methods=['GET','POST'])
@@ -657,9 +716,8 @@ def help_hacked():
     if request.method == 'POST':
         msg = request.form.get('message','').strip()
         if msg:
-            with get_db() as db:
-                db.execute("INSERT INTO support_messages (user_id,content) VALUES (?,?)", (session['user_id'], msg))
-            success = "تم إرسال رسالتك للدعم الفني بنجاح ✅"
+            fb_push('support_messages', {'user_id': session['user_id'], 'username': session['username'], 'content': msg, 'created_at': now()})
+            success = "ØªÙ… Ø¥Ø±Ø³Ø§Ù„ Ø±Ø³Ø§Ù„ØªÙƒ Ù„Ù„Ø¯Ø¹Ù… Ø§Ù„ÙÙ†ÙŠ âœ…"
     return render_template('help_hacked.html', success=success, **get_user_context())
 
 @app.route('/help/security')
@@ -677,63 +735,64 @@ def privacy_center():
 def support():
     return render_template('support.html', **get_user_context())
 
-# ─── Channels ────────────────────────────────────────────────
+# â”€â”€â”€ Channels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @app.route('/channels')
 @login_required
 def channels():
-    with get_db() as db:
-        chans = db.execute("""
-            SELECT c.*,
-                   c.base_subscribers + (SELECT COUNT(*) FROM channel_subscriptions WHERE channel_id=c.id) as subscribers
-            FROM channels c ORDER BY subscribers DESC
-        """).fetchall()
+    chans = fb_query('channels')
+    for ch in chans:
+        subs = fb_get(f'channel_subs/{ch["_id"]}') or {}
+        ch['subscribers'] = ch.get('base_subscribers', 1) + len(subs)
+        ch['id'] = ch['_id']
+    chans.sort(key=lambda x: x.get('subscribers',0), reverse=True)
     return render_template('channels.html', channels=chans, **get_user_context())
 
-@app.route('/channel/<int:channel_id>')
+@app.route('/channel/<channel_id>')
 @login_required
 def view_channel(channel_id):
-    with get_db() as db:
-        channel = db.execute("""
-            SELECT c.*,
-                   c.base_subscribers + (SELECT COUNT(*) FROM channel_subscriptions WHERE channel_id=c.id) as subscribers
-            FROM channels c WHERE c.id=?
-        """, (channel_id,)).fetchone()
-        if not channel: return "قناة غير موجودة", 404
-        posts = db.execute("""
-            SELECT p.*,
-                   (SELECT COUNT(*) FROM likes WHERE post_id=p.id) as like_count,
-                   (SELECT COUNT(*) FROM likes WHERE post_id=p.id AND user_id=?) as user_liked
-            FROM posts p WHERE p.channel_id=? ORDER BY p.created_at DESC
-        """, (session['user_id'], channel_id)).fetchall()
-        is_subscribed = db.execute("SELECT * FROM channel_subscriptions WHERE user_id=? AND channel_id=?",
-                                   (session['user_id'], channel_id)).fetchone()
-    return render_template('channel_view.html', channel=channel, posts=posts, is_subscribed=is_subscribed, **get_user_context())
+    channel = fb_get(f'channels/{channel_id}')
+    if not channel: return "Ù‚Ù†Ø§Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©", 404
+    channel['id'] = channel_id
+    channel['_id'] = channel_id
+    subs = fb_get(f'channel_subs/{channel_id}') or {}
+    channel['subscribers'] = channel.get('base_subscribers', 1) + len(subs)
+    is_subscribed = session['user_id'] in subs
 
-@app.route('/channel/<int:channel_id>/subscribe', methods=['POST'])
+    posts_data = fb_query('posts')
+    posts = []
+    for p in posts_data:
+        if p.get('channel_id') == channel_id:
+            likes = fb_get(f'likes/{p["_id"]}') or {}
+            p['like_count'] = len(likes)
+            p['user_liked'] = session['user_id'] in likes
+            p['id'] = p['_id']
+            posts.append(p)
+    posts.sort(key=lambda x: x.get('created_at',''), reverse=True)
+
+    return render_template('channel_view.html', channel=channel, posts=posts,
+                          is_subscribed=is_subscribed, **get_user_context())
+
+@app.route('/channel/<channel_id>/subscribe', methods=['POST'])
 @login_required
 def subscribe_channel(channel_id):
-    with get_db() as db:
-        try:
-            db.execute("INSERT INTO channel_subscriptions (user_id,channel_id) VALUES (?,?)", (session['user_id'], channel_id))
-        except: pass
+    fb_set(f'channel_subs/{channel_id}/{session["user_id"]}', True)
     return redirect(url_for('view_channel', channel_id=channel_id))
 
-@app.route('/channel/<int:channel_id>/unsubscribe', methods=['POST'])
+@app.route('/channel/<channel_id>/unsubscribe', methods=['POST'])
 @login_required
 def unsubscribe_channel(channel_id):
-    with get_db() as db:
-        db.execute("DELETE FROM channel_subscriptions WHERE user_id=? AND channel_id=?", (session['user_id'], channel_id))
+    fb_delete(f'channel_subs/{channel_id}/{session["user_id"]}')
     return redirect(url_for('view_channel', channel_id=channel_id))
 
-@app.route('/channel/<int:channel_id>/post', methods=['POST'])
+@app.route('/channel/<channel_id>/post', methods=['POST'])
 @login_required
 def post_in_channel(channel_id):
-    with get_db() as db:
-        channel = db.execute("SELECT * FROM channels WHERE id=? AND owner_id=?", (channel_id, session['user_id'])).fetchone()
-        if not channel: return "غير مصرح", 403
-        content = request.form['content'].strip()
-        if content:
-            db.execute("INSERT INTO posts (user_id,channel_id,content) VALUES (?,?,?)", (session['user_id'], channel_id, content))
+    channel = fb_get(f'channels/{channel_id}')
+    if not channel or channel.get('owner_id') != session['user_id']:
+        return "ØºÙŠØ± Ù…ØµØ±Ø­", 403
+    content = request.form['content'].strip()
+    if content:
+        fb_push('posts', {'user_id': session['user_id'], 'channel_id': channel_id, 'content': content, 'created_at': now()})
     return redirect(url_for('view_channel', channel_id=channel_id))
 
 @app.route('/channel/create', methods=['GET','POST'])
@@ -743,96 +802,97 @@ def create_channel():
         name = request.form['name'].strip()
         username = request.form['username'].strip().lstrip('@')
         desc = request.form.get('description','').strip()
-        avatar = request.form.get('avatar','📡').strip()
+        avatar = request.form.get('avatar','ðŸ“¡').strip()
         cover_url = ''
         if 'cover' in request.files:
-            saved = save_photo(request.files['cover'], f"ch_{username}")
+            saved = save_photo(request.files['cover'])
             if saved: cover_url = saved
-        try:
-            with get_db() as db:
-                db.execute("INSERT INTO channels (owner_id,name,username,description,avatar,cover_url) VALUES (?,?,?,?,?,?)",
-                          (session['user_id'], name, username, desc, avatar, cover_url))
-            return redirect(url_for('channels'))
-        except:
-            return render_template('create_channel.html', error="اسم المستخدم مستخدم مسبقاً", **get_user_context())
+        # Check username
+        chans = fb_query('channels')
+        if any(ch.get('username') == username for ch in chans):
+            return render_template('create_channel.html', error="Ø§Ø³Ù… Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… Ù…Ø³ØªØ®Ø¯Ù… Ù…Ø³Ø¨Ù‚Ø§Ù‹", **get_user_context())
+        fb_push('channels', {'owner_id': session['user_id'], 'name': name, 'username': username,
+                             'description': desc, 'avatar': avatar, 'cover_url': cover_url,
+                             'is_verified': False, 'base_subscribers': 1, 'created_at': now()})
+        return redirect(url_for('channels'))
     return render_template('create_channel.html', **get_user_context())
 
-# ─── Admin ───────────────────────────────────────────────────
+# â”€â”€â”€ Admin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @app.route('/admin/login', methods=['GET','POST'])
 def admin_login():
     if request.method == 'POST':
         if request.form['password'] == ADMIN_PASSWORD:
             session['is_admin'] = True
             return redirect(url_for('admin_dashboard'))
-        return render_template('admin_login.html', error="كلمة مرور خاطئة")
+        return render_template('admin_login.html', error="ÙƒÙ„Ù…Ø© Ù…Ø±ÙˆØ± Ø®Ø§Ø·Ø¦Ø©")
     return render_template('admin_login.html')
 
 @app.route('/admin')
 @admin_required
 def admin_dashboard():
-    with get_db() as db:
-        users = db.execute("SELECT * FROM users ORDER BY created_at DESC").fetchall()
-        posts = db.execute("SELECT p.*,u.username FROM posts p JOIN users u ON p.user_id=u.id ORDER BY p.created_at DESC").fetchall()
-        msgs = db.execute("SELECT m.*,u.username as sender,r.username as receiver FROM messages m JOIN users u ON m.sender_id=u.id JOIN users r ON m.receiver_id=r.id ORDER BY m.created_at DESC LIMIT 100").fetchall()
-        support_msgs = db.execute("SELECT s.*,u.username FROM support_messages s JOIN users u ON s.user_id=u.id ORDER BY s.created_at DESC").fetchall()
-        stats = {
-            'users': db.execute("SELECT COUNT(*) FROM users").fetchone()[0],
-            'posts': db.execute("SELECT COUNT(*) FROM posts").fetchone()[0],
-            'messages': db.execute("SELECT COUNT(*) FROM messages").fetchone()[0],
-            'active': db.execute("SELECT COUNT(DISTINCT user_id) FROM sessions").fetchone()[0],
-        }
-    return render_template('admin.html', users=users, posts=posts, messages=msgs, support_msgs=support_msgs, stats=stats)
+    users = fb_query('users')
+    posts = fb_query('posts')
+    support_msgs = fb_query('support_messages')
+    sessions_data = fb_get('sessions') or {}
+    active = len(sessions_data)
+    stats = {'users': len(users), 'posts': len(posts), 'messages': 0, 'active': active}
 
-@app.route('/admin/user/<int:user_id>')
+    # Get all messages count
+    msgs_data = fb_get('messages') or {}
+    msg_list = []
+    for conv_id, conv in msgs_data.items():
+        if isinstance(conv, dict):
+            for mid, m in conv.items():
+                if isinstance(m, dict):
+                    stats['messages'] += 1
+                    m['conv_id'] = conv_id
+                    msg_list.append(m)
+
+    return render_template('admin.html', users=users, posts=posts, messages=msg_list[:100],
+                          support_msgs=support_msgs, stats=stats)
+
+@app.route('/admin/user/<user_id>')
 @admin_required
 def admin_view_user(user_id):
-    with get_db() as db:
-        user = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-        posts = db.execute("SELECT * FROM posts WHERE user_id=? ORDER BY created_at DESC", (user_id,)).fetchall()
-        user_msgs = db.execute("SELECT m.*,u.username as receiver FROM messages m JOIN users u ON m.receiver_id=u.id WHERE m.sender_id=? ORDER BY m.created_at DESC LIMIT 50", (user_id,)).fetchall()
-    return render_template('admin_user.html', user=user, posts=posts, user_msgs=user_msgs)
+    user = get_user_by_id(user_id)
+    posts = [p for p in fb_query('posts') if p.get('user_id') == user_id]
+    return render_template('admin_user.html', user=user, posts=posts, user_msgs=[])
 
-@app.route('/admin/ban/<int:user_id>', methods=['POST'])
+@app.route('/admin/ban/<user_id>', methods=['POST'])
 @admin_required
 def admin_ban(user_id):
+    user = get_user_by_id(user_id)
     ban_until = request.form.get('ban_until','')
-    with get_db() as db:
-        user = db.execute("SELECT is_banned FROM users WHERE id=?", (user_id,)).fetchone()
-        new_status = 0 if user['is_banned'] else 1
-        db.execute("UPDATE users SET is_banned=?,ban_until=? WHERE id=?", (new_status, ban_until if new_status else '', user_id))
+    new_status = not user.get('is_banned', False)
+    fb_update(f'users/{user_id}', {'is_banned': new_status, 'ban_until': ban_until if new_status else ''})
     return redirect(url_for('admin_dashboard'))
 
-@app.route('/admin/delete_user/<int:user_id>', methods=['POST'])
+@app.route('/admin/delete_user/<user_id>', methods=['POST'])
 @admin_required
 def admin_delete_user(user_id):
-    with get_db() as db:
-        db.execute("DELETE FROM users WHERE id=?", (user_id,))
-        db.execute("DELETE FROM posts WHERE user_id=?", (user_id,))
+    fb_delete(f'users/{user_id}')
     return redirect(url_for('admin_dashboard'))
 
-@app.route('/admin/delete_post/<int:post_id>', methods=['POST'])
+@app.route('/admin/delete_post/<post_id>', methods=['POST'])
 @admin_required
 def admin_delete_post(post_id):
-    with get_db() as db:
-        db.execute("DELETE FROM posts WHERE id=?", (post_id,))
+    fb_delete(f'posts/{post_id}')
     return redirect(url_for('admin_dashboard'))
 
-@app.route('/admin/restrict/<int:user_id>', methods=['POST'])
-@admin_required
-def admin_restrict(user_id):
-    label = request.form.get('label','مقيّد')
-    with get_db() as db:
-        user = db.execute("SELECT is_restricted FROM users WHERE id=?", (user_id,)).fetchone()
-        new = 0 if user['is_restricted'] else 1
-        db.execute("UPDATE users SET is_restricted=?,restrict_label=? WHERE id=?", (new, label if new else '', user_id))
-    return redirect(url_for('admin_dashboard'))
-
-@app.route('/admin/verify/<int:user_id>', methods=['POST'])
+@app.route('/admin/verify/<user_id>', methods=['POST'])
 @admin_required
 def admin_verify(user_id):
-    with get_db() as db:
-        user = db.execute("SELECT is_verified FROM users WHERE id=?", (user_id,)).fetchone()
-        db.execute("UPDATE users SET is_verified=? WHERE id=?", (0 if user['is_verified'] else 1, user_id))
+    user = get_user_by_id(user_id)
+    fb_update(f'users/{user_id}', {'is_verified': not user.get('is_verified', False)})
+    return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/restrict/<user_id>', methods=['POST'])
+@admin_required
+def admin_restrict(user_id):
+    label = request.form.get('label','Ù…Ù‚ÙŠÙ‘Ø¯')
+    user = get_user_by_id(user_id)
+    new = not user.get('is_restricted', False)
+    fb_update(f'users/{user_id}', {'is_restricted': new, 'restrict_label': label if new else ''})
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/broadcast', methods=['POST'])
@@ -840,22 +900,9 @@ def admin_verify(user_id):
 def admin_broadcast():
     content = request.form.get('content','').strip()
     if content:
-        with get_db() as db:
-            users = db.execute("SELECT id FROM users").fetchall()
-            for u in users:
-                db.execute("INSERT INTO notifications (user_id,content) VALUES (?,?)", (u['id'], f"📢 {content}"))
-    return redirect(url_for('admin_dashboard'))
-
-@app.route('/admin/channel_post/<int:channel_id>', methods=['POST'])
-@admin_required
-def admin_channel_post(channel_id):
-    content = request.form.get('content','').strip()
-    if content:
-        with get_db() as db:
-            channel = db.execute("SELECT * FROM channels WHERE id=?", (channel_id,)).fetchone()
-            if channel:
-                db.execute("INSERT INTO posts (user_id,channel_id,content) VALUES (?,?,?)",
-                          (channel['owner_id'], channel_id, content))
+        users = fb_query('users')
+        for u in users:
+            fb_push(f'notifications/{u["_id"]}', {'content': f"ðŸ“¢ {content}", 'is_read': False, 'created_at': now()})
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/logout')
@@ -873,3 +920,4 @@ def handle_message(data):
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=5000)
+
