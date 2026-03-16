@@ -1,6 +1,6 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 from flask_socketio import SocketIO, emit, join_room
-import sqlite3, bcrypt, os, uuid
+import sqlite3, bcrypt, os, uuid, base64
 from datetime import datetime
 from functools import wraps
 
@@ -9,6 +9,14 @@ app.secret_key = os.environ.get("SECRET_KEY", "clipn-secret-2024")
 socketio = SocketIO(app, cors_allowed_origins="*")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin2024")
 DB = "clipn.db"
+CLIPN_OWNER_USERNAME = "Clipn"
+
+# ─── Jinja filter ────────────────────────────────────────────
+@app.template_filter('format_number')
+def format_number(n):
+    if n >= 1_000_000: return f"{n/1_000_000:.1f}M"
+    if n >= 1_000: return f"{n/1_000:.1f}K"
+    return str(n)
 
 def get_db():
     conn = sqlite3.connect(DB)
@@ -26,6 +34,7 @@ def init_db():
             password TEXT NOT NULL,
             bio TEXT DEFAULT '',
             avatar TEXT DEFAULT '😊',
+            photo_url TEXT DEFAULT '',
             phone TEXT DEFAULT '',
             dob TEXT DEFAULT '',
             is_private INTEGER DEFAULT 0,
@@ -44,6 +53,7 @@ def init_db():
             notif_visits INTEGER DEFAULT 1,
             notif_reposts INTEGER DEFAULT 1,
             notif_messages INTEGER DEFAULT 1,
+            notif_channels INTEGER DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS sessions (
@@ -56,6 +66,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS posts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
+            channel_id INTEGER DEFAULT NULL,
             content TEXT NOT NULL,
             hashtags TEXT DEFAULT '',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -108,9 +119,16 @@ def init_db():
             username TEXT UNIQUE NOT NULL,
             description TEXT DEFAULT '',
             avatar TEXT DEFAULT '📡',
+            cover_url TEXT DEFAULT '',
             is_verified INTEGER DEFAULT 0,
-            subscribers INTEGER DEFAULT 1,
+            base_subscribers INTEGER DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS channel_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            channel_id INTEGER NOT NULL,
+            UNIQUE(user_id, channel_id)
         );
         CREATE TABLE IF NOT EXISTS support_messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -119,15 +137,28 @@ def init_db():
             is_from_user INTEGER DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
-        CREATE TABLE IF NOT EXISTS broadcast_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            admin_id INTEGER NOT NULL,
-            content TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
         """)
+    # Create official Clipn channel if not exists
+    _create_clipn_channel()
 
 init_db()
+
+def _create_clipn_channel():
+    with get_db() as db:
+        existing = db.execute("SELECT id FROM channels WHERE username=?", (CLIPN_OWNER_USERNAME,)).fetchone()
+        if not existing:
+            # Get or create admin user
+            admin = db.execute("SELECT id FROM users WHERE username=?", (CLIPN_OWNER_USERNAME,)).fetchone()
+            if not admin:
+                hashed = bcrypt.hashpw(b"clipn_admin_2024", bcrypt.gensalt()).decode()
+                db.execute("INSERT OR IGNORE INTO users (username,display_name,email,password,is_verified) VALUES (?,?,?,?,1)",
+                          (CLIPN_OWNER_USERNAME, "Clipn Official", "admin@clipn.com", hashed))
+                admin = db.execute("SELECT id FROM users WHERE username=?", (CLIPN_OWNER_USERNAME,)).fetchone()
+            if admin:
+                db.execute("""INSERT OR IGNORE INTO channels (owner_id,name,username,description,avatar,is_verified,base_subscribers)
+                              VALUES (?,?,?,?,?,1,789000)""",
+                          (admin['id'], 'Clipn', CLIPN_OWNER_USERNAME,
+                           'القناة الرسمية لتطبيق Clipn 🚀', '🌐'))
 
 def login_required(f):
     @wraps(f)
@@ -145,9 +176,15 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated
 
-def add_notif(user_id, content):
+def add_notif(user_id, content, notif_type=None):
+    """Add notification respecting user settings"""
+    if notif_type:
+        with get_db() as db:
+            user = db.execute(f"SELECT {notif_type} FROM users WHERE id=?", (user_id,)).fetchone()
+            if user and not user[notif_type]:
+                return  # User disabled this notification type
     with get_db() as db:
-        db.execute("INSERT INTO notifications (user_id, content) VALUES (?,?)", (user_id, content))
+        db.execute("INSERT INTO notifications (user_id,content) VALUES (?,?)", (user_id, content))
 
 def get_user_context():
     if 'user_id' not in session: return {}
@@ -155,6 +192,17 @@ def get_user_context():
         notif_count = db.execute("SELECT COUNT(*) FROM notifications WHERE user_id=? AND is_read=0", (session['user_id'],)).fetchone()[0]
         unread_dm = db.execute("SELECT COUNT(*) FROM messages WHERE receiver_id=? AND is_read=0", (session['user_id'],)).fetchone()[0]
     return {'notif_count': notif_count, 'unread_dm': unread_dm}
+
+def save_photo(file_data, filename):
+    """Save photo as base64 data URL"""
+    if not file_data or file_data.filename == '':
+        return None
+    data = file_data.read()
+    if not data: return None
+    ext = file_data.filename.rsplit('.', 1)[-1].lower()
+    mime = {'jpg':'jpeg','jpeg':'jpeg','png':'png','gif':'gif','webp':'webp'}.get(ext,'jpeg')
+    b64 = base64.b64encode(data).decode()
+    return f"data:image/{mime};base64,{b64}"
 
 # ─── Auth ────────────────────────────────────────────────────
 @app.route('/register', methods=['GET','POST'])
@@ -174,7 +222,7 @@ def register():
                 db.execute("INSERT INTO users (username,display_name,email,password,dob) VALUES (?,?,?,?,?)",
                           (username, display_name or username, email, hashed, dob))
             return redirect(url_for('login'))
-        except Exception as e:
+        except:
             return render_template('register.html', error="اسم المستخدم أو البريد مستخدم مسبقاً")
     return render_template('register.html')
 
@@ -188,14 +236,15 @@ def login():
             user = db.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
         if user and bcrypt.checkpw(password.encode(), user['password'].encode()):
             if user['is_banned']:
-                ban_msg = f"حسابك موقوف حتى {user['ban_until']}" if user['ban_until'] else "حسابك موقوف"
-                return render_template('login.html', error=ban_msg)
+                msg = f"حسابك موقوف حتى {user['ban_until']}" if user['ban_until'] else "حسابك موقوف"
+                return render_template('login.html', error=msg)
             if user['two_fa_enabled'] and two_fa != user['two_fa_code']:
                 return render_template('login.html', error="رمز التحقق بخطوتين غير صحيح", show_2fa=True)
             session['user_id'] = user['id']
             session['username'] = user['username']
             session['display_name'] = user['display_name']
             session['avatar'] = user['avatar']
+            session['photo_url'] = user['photo_url']
             session['theme'] = user['theme']
             sess_id = str(uuid.uuid4())
             session['session_id'] = sess_id
@@ -221,11 +270,13 @@ def logout():
 def forgot_password():
     msg = None
     if request.method == 'POST':
-        email = request.form['email'].strip()
+        email = request.form.get('email','').strip()
         with get_db() as db:
             user = db.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
         if user:
-            msg = f"تم إرسال كلمة المرور إلى {email[:2]}***{email.split('@')[1][-1]}@{email.split('@')[1]}"
+            parts = email.split('@')
+            masked = parts[0][:2] + '***' + '@' + parts[1]
+            msg = f"تم إرسال كلمة المرور إلى {masked}"
         else:
             msg = "البريد غير موجود"
     return render_template('forgot_password.html', msg=msg)
@@ -236,15 +287,16 @@ def forgot_password():
 def home():
     with get_db() as db:
         posts = db.execute("""
-            SELECT p.*, u.username, u.display_name, u.avatar, u.is_verified, u.is_restricted, u.restrict_label,
+            SELECT p.*, u.username, u.display_name, u.avatar, u.photo_url, u.is_verified, u.is_restricted, u.restrict_label,
                    (SELECT COUNT(*) FROM likes WHERE post_id=p.id) as like_count,
                    (SELECT COUNT(*) FROM comments WHERE post_id=p.id) as comment_count,
                    (SELECT COUNT(*) FROM likes WHERE post_id=p.id AND user_id=?) as user_liked
             FROM posts p JOIN users u ON p.user_id=u.id
+            WHERE p.channel_id IS NULL
             ORDER BY p.created_at DESC LIMIT 50
         """, (session['user_id'],)).fetchall()
         stories = db.execute("""
-            SELECT s.*, u.username, u.avatar FROM stories s
+            SELECT s.*, u.username, u.avatar, u.photo_url FROM stories s
             JOIN users u ON s.user_id=u.id ORDER BY s.created_at DESC LIMIT 20
         """).fetchall()
     ctx = get_user_context()
@@ -275,7 +327,7 @@ def like_post(post_id):
             liked = True
             p = db.execute("SELECT user_id FROM posts WHERE id=?", (post_id,)).fetchone()
             if p and p['user_id'] != session['user_id']:
-                add_notif(p['user_id'], f"❤️ {session['username']} أعجب بمنشورك")
+                add_notif(p['user_id'], f"❤️ {session['username']} أعجب بمنشورك", 'notif_likes')
         count = db.execute("SELECT COUNT(*) FROM likes WHERE post_id=?", (post_id,)).fetchone()[0]
     return jsonify({"liked": liked, "count": count})
 
@@ -288,7 +340,7 @@ def comment(post_id):
             db.execute("INSERT INTO comments (user_id,post_id,content) VALUES (?,?,?)", (session['user_id'], post_id, content))
             p = db.execute("SELECT user_id FROM posts WHERE id=?", (post_id,)).fetchone()
             if p and p['user_id'] != session['user_id']:
-                add_notif(p['user_id'], f"💬 {session['username']} علّق على منشورك")
+                add_notif(p['user_id'], f"💬 {session['username']} علّق على منشورك", 'notif_likes')
     return redirect(url_for('home'))
 
 @app.route('/delete_post/<int:post_id>', methods=['POST'])
@@ -316,19 +368,20 @@ def profile(username):
         user = db.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
         if not user: return "مستخدم غير موجود", 404
         posts = db.execute("""
-            SELECT p.*, u.username, u.display_name, u.avatar, u.is_verified, u.is_restricted,
+            SELECT p.*, u.username, u.display_name, u.avatar, u.photo_url, u.is_verified, u.is_restricted,
                    (SELECT COUNT(*) FROM likes WHERE post_id=p.id) as like_count,
                    (SELECT COUNT(*) FROM comments WHERE post_id=p.id) as comment_count,
                    (SELECT COUNT(*) FROM likes WHERE post_id=p.id AND user_id=?) as user_liked
             FROM posts p JOIN users u ON p.user_id=u.id
-            WHERE p.user_id=? ORDER BY p.created_at DESC
+            WHERE p.user_id=? AND p.channel_id IS NULL ORDER BY p.created_at DESC
         """, (session['user_id'], user['id'])).fetchall()
         followers = db.execute("SELECT COUNT(*) FROM follows WHERE following_id=?", (user['id'],)).fetchone()[0]
-        following = db.execute("SELECT COUNT(*) FROM follows WHERE follower_id=?", (user['id'],)).fetchone()[0]
+        following_count = db.execute("SELECT COUNT(*) FROM follows WHERE follower_id=?", (user['id'],)).fetchone()[0]
         is_following = db.execute("SELECT * FROM follows WHERE follower_id=? AND following_id=?", (session['user_id'], user['id'])).fetchone()
         channels = db.execute("SELECT * FROM channels WHERE owner_id=?", (user['id'],)).fetchall()
     ctx = get_user_context()
-    return render_template('profile.html', user=user, posts=posts, followers=followers, following=following, is_following=is_following, channels=channels, **ctx)
+    return render_template('profile.html', user=user, posts=posts, followers=followers,
+                          following=following_count, is_following=is_following, channels=channels, **ctx)
 
 @app.route('/follow/<int:user_id>', methods=['POST'])
 @login_required
@@ -342,7 +395,7 @@ def follow(user_id):
         else:
             db.execute("INSERT INTO follows (follower_id,following_id) VALUES (?,?)", (session['user_id'], user_id))
             following = True
-            add_notif(user_id, f"👤 {session['username']} بدأ متابعتك")
+            add_notif(user_id, f"👤 {session['username']} بدأ متابعتك", 'notif_follows')
     return jsonify({"following": following})
 
 # ─── Search ──────────────────────────────────────────────────
@@ -355,8 +408,8 @@ def search():
         with get_db() as db:
             users = db.execute("SELECT * FROM users WHERE username LIKE ? OR display_name LIKE ?", (f'%{q}%',f'%{q}%')).fetchall()
             posts = db.execute("""
-                SELECT p.*, u.username, u.display_name, u.avatar FROM posts p JOIN users u ON p.user_id=u.id
-                WHERE p.content LIKE ? OR p.hashtags LIKE ? ORDER BY p.created_at DESC
+                SELECT p.*, u.username, u.display_name, u.avatar, u.photo_url FROM posts p JOIN users u ON p.user_id=u.id
+                WHERE (p.content LIKE ? OR p.hashtags LIKE ?) AND p.channel_id IS NULL ORDER BY p.created_at DESC
             """, (f'%{q}%',f'%{q}%')).fetchall()
             channels = db.execute("SELECT * FROM channels WHERE name LIKE ? OR username LIKE ?", (f'%{q}%',f'%{q}%')).fetchall()
     ctx = get_user_context()
@@ -378,7 +431,7 @@ def notifications():
 def messages():
     with get_db() as db:
         convos = db.execute("""
-            SELECT DISTINCT u.id, u.username, u.display_name, u.avatar,
+            SELECT DISTINCT u.id, u.username, u.display_name, u.avatar, u.photo_url,
                    (SELECT content FROM messages WHERE (sender_id=? AND receiver_id=u.id) OR (sender_id=u.id AND receiver_id=?) ORDER BY created_at DESC LIMIT 1) as last_msg,
                    (SELECT COUNT(*) FROM messages WHERE sender_id=u.id AND receiver_id=? AND is_read=0) as unread
             FROM users u WHERE u.id IN (
@@ -396,7 +449,7 @@ def chat(user_id):
         other = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         if not other: return "مستخدم غير موجود", 404
         msgs = db.execute("""
-            SELECT m.*, u.username, u.display_name, u.avatar FROM messages m
+            SELECT m.*, u.username, u.display_name, u.avatar, u.photo_url FROM messages m
             JOIN users u ON m.sender_id=u.id
             WHERE (sender_id=? AND receiver_id=?) OR (sender_id=? AND receiver_id=?)
             ORDER BY m.created_at ASC
@@ -412,6 +465,7 @@ def send_message(receiver_id):
     if content:
         with get_db() as db:
             db.execute("INSERT INTO messages (sender_id,receiver_id,content) VALUES (?,?,?)", (session['user_id'], receiver_id, content))
+        add_notif(receiver_id, f"💬 رسالة جديدة من {session['username']}", 'notif_messages')
     return redirect(url_for('chat', user_id=receiver_id))
 
 # ─── Settings ────────────────────────────────────────────────
@@ -432,12 +486,21 @@ def settings_profile():
         bio = request.form.get('bio','').strip()
         avatar = request.form.get('avatar','😊').strip()
         new_username = request.form.get('username_edit','').strip().lstrip('@')
+        photo_url = user['photo_url']
+        # Handle photo upload
+        if 'photo' in request.files:
+            photo = request.files['photo']
+            saved = save_photo(photo, f"user_{session['user_id']}")
+            if saved:
+                photo_url = saved
         try:
+            final_username = new_username if new_username else user['username']
             with get_db() as db:
-                db.execute("UPDATE users SET display_name=?,bio=?,avatar=?,username=? WHERE id=?",
-                          (display_name, bio, avatar, new_username or user['username'], session['user_id']))
+                db.execute("UPDATE users SET display_name=?,bio=?,avatar=?,username=?,photo_url=? WHERE id=?",
+                          (display_name, bio, avatar, final_username, photo_url, session['user_id']))
             session['display_name'] = display_name
             session['avatar'] = avatar
+            session['photo_url'] = photo_url
             if new_username: session['username'] = new_username
             success = "تم حفظ التغييرات بنجاح ✅"
             with get_db() as db:
@@ -484,9 +547,7 @@ def settings_security():
 @login_required
 def logout_session(sess_id):
     with get_db() as db:
-        s = db.execute("SELECT * FROM sessions WHERE id=? AND user_id=?", (sess_id, session['user_id'])).fetchone()
-        if s:
-            db.execute("DELETE FROM sessions WHERE id=?", (sess_id,))
+        db.execute("DELETE FROM sessions WHERE id=? AND user_id=?", (sess_id, session['user_id']))
     return redirect(url_for('settings_security'))
 
 @app.route('/settings/security/2fa', methods=['GET'])
@@ -507,7 +568,7 @@ def enable_2fa():
             user = db.execute("SELECT * FROM users WHERE id=?", (session['user_id'],)).fetchone()
         return render_template('settings_2fa.html', user=user, error="الرمزان غير متطابقان", **get_user_context())
     with get_db() as db:
-        db.execute("UPDATE users SET two_fa_enabled=1, two_fa_code=? WHERE id=?", (code, session['user_id']))
+        db.execute("UPDATE users SET two_fa_enabled=1,two_fa_code=? WHERE id=?", (code, session['user_id']))
     return redirect(url_for('settings_2fa'))
 
 @app.route('/settings/security/2fa/disable', methods=['POST'])
@@ -518,7 +579,7 @@ def disable_2fa():
         user = db.execute("SELECT * FROM users WHERE id=?", (session['user_id'],)).fetchone()
     if bcrypt.checkpw(password.encode(), user['password'].encode()):
         with get_db() as db:
-            db.execute("UPDATE users SET two_fa_enabled=0, two_fa_code='' WHERE id=?", (session['user_id'],))
+            db.execute("UPDATE users SET two_fa_enabled=0,two_fa_code='' WHERE id=?", (session['user_id'],))
     return redirect(url_for('settings_2fa'))
 
 @app.route('/settings/appearance', methods=['GET','POST'])
@@ -533,20 +594,13 @@ def settings_appearance():
     ctx = get_user_context()
     return render_template('settings_appearance.html', **ctx)
 
-@app.route('/settings/share-profile')
-@login_required
-def share_profile():
-    link = f"https://n-py.onrender.com/profile/{session['username']}"
-    ctx = get_user_context()
-    return render_template('share_profile.html', link=link, **ctx)
-
 @app.route('/settings/notifications', methods=['GET','POST'])
 @login_required
 def settings_notifications():
     with get_db() as db:
         user = db.execute("SELECT * FROM users WHERE id=?", (session['user_id'],)).fetchone()
     if request.method == 'POST':
-        fields = ['notif_likes','notif_follows','notif_visits','notif_reposts','notif_messages']
+        fields = ['notif_likes','notif_follows','notif_visits','notif_reposts','notif_messages','notif_channels']
         for f in fields:
             val = 1 if f in request.form else 0
             with get_db() as db:
@@ -568,20 +622,25 @@ def settings_audience():
     ctx = get_user_context()
     return render_template('settings_audience.html', user=user, **ctx)
 
+@app.route('/settings/share-profile')
+@login_required
+def share_profile():
+    link = f"https://n-py.onrender.com/profile/{session['username']}"
+    ctx = get_user_context()
+    return render_template('share_profile.html', link=link, **ctx)
+
 # ─── Help ────────────────────────────────────────────────────
 @app.route('/help')
 @login_required
 def help_center():
-    ctx = get_user_context()
-    return render_template('help.html', **ctx)
+    return render_template('help.html', **get_user_context())
 
 @app.route('/help/account-info')
 @login_required
 def help_account_info():
     with get_db() as db:
         user = db.execute("SELECT * FROM users WHERE id=?", (session['user_id'],)).fetchone()
-    ctx = get_user_context()
-    return render_template('help_account_info.html', user=user, **ctx)
+    return render_template('help_account_info.html', user=user, **get_user_context())
 
 @app.route('/help/hacked', methods=['GET','POST'])
 @login_required
@@ -593,44 +652,81 @@ def help_hacked():
             with get_db() as db:
                 db.execute("INSERT INTO support_messages (user_id,content) VALUES (?,?)", (session['user_id'], msg))
             success = "تم إرسال رسالتك للدعم الفني بنجاح ✅"
-    ctx = get_user_context()
-    return render_template('help_hacked.html', success=success, **ctx)
+    return render_template('help_hacked.html', success=success, **get_user_context())
+
+@app.route('/help/security')
+@login_required
+def help_security():
+    return redirect(url_for('settings_security'))
 
 @app.route('/privacy-center')
 @login_required
 def privacy_center():
-    ctx = get_user_context()
-    return render_template('privacy_center.html', **ctx)
+    return render_template('privacy_center.html', **get_user_context())
 
 @app.route('/support')
 @login_required
 def support():
-    ctx = get_user_context()
-    return render_template('support.html', **ctx)
-
-@app.route('/forgot-password', methods=['GET','POST'])
-def forgot_password_route():
-    msg = None
-    if request.method == 'POST':
-        email = request.form.get('email','').strip()
-        with get_db() as db:
-            user = db.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
-        if user:
-            parts = email.split('@')
-            masked = parts[0][:2] + '***' + '@' + parts[1]
-            msg = f"تم إرسال كلمة المرور الأصلية إلى {masked}"
-        else:
-            msg = "البريد غير موجود في النظام"
-    return render_template('forgot_password.html', msg=msg)
+    return render_template('support.html', **get_user_context())
 
 # ─── Channels ────────────────────────────────────────────────
 @app.route('/channels')
 @login_required
 def channels():
     with get_db() as db:
-        chans = db.execute("SELECT c.*, u.username as owner FROM channels c JOIN users u ON c.owner_id=u.id ORDER BY c.subscribers DESC").fetchall()
-    ctx = get_user_context()
-    return render_template('channels.html', channels=chans, **ctx)
+        chans = db.execute("""
+            SELECT c.*,
+                   c.base_subscribers + (SELECT COUNT(*) FROM channel_subscriptions WHERE channel_id=c.id) as subscribers
+            FROM channels c ORDER BY subscribers DESC
+        """).fetchall()
+    return render_template('channels.html', channels=chans, **get_user_context())
+
+@app.route('/channel/<int:channel_id>')
+@login_required
+def view_channel(channel_id):
+    with get_db() as db:
+        channel = db.execute("""
+            SELECT c.*,
+                   c.base_subscribers + (SELECT COUNT(*) FROM channel_subscriptions WHERE channel_id=c.id) as subscribers
+            FROM channels c WHERE c.id=?
+        """, (channel_id,)).fetchone()
+        if not channel: return "قناة غير موجودة", 404
+        posts = db.execute("""
+            SELECT p.*,
+                   (SELECT COUNT(*) FROM likes WHERE post_id=p.id) as like_count,
+                   (SELECT COUNT(*) FROM likes WHERE post_id=p.id AND user_id=?) as user_liked
+            FROM posts p WHERE p.channel_id=? ORDER BY p.created_at DESC
+        """, (session['user_id'], channel_id)).fetchall()
+        is_subscribed = db.execute("SELECT * FROM channel_subscriptions WHERE user_id=? AND channel_id=?",
+                                   (session['user_id'], channel_id)).fetchone()
+    return render_template('channel_view.html', channel=channel, posts=posts, is_subscribed=is_subscribed, **get_user_context())
+
+@app.route('/channel/<int:channel_id>/subscribe', methods=['POST'])
+@login_required
+def subscribe_channel(channel_id):
+    with get_db() as db:
+        try:
+            db.execute("INSERT INTO channel_subscriptions (user_id,channel_id) VALUES (?,?)", (session['user_id'], channel_id))
+        except: pass
+    return redirect(url_for('view_channel', channel_id=channel_id))
+
+@app.route('/channel/<int:channel_id>/unsubscribe', methods=['POST'])
+@login_required
+def unsubscribe_channel(channel_id):
+    with get_db() as db:
+        db.execute("DELETE FROM channel_subscriptions WHERE user_id=? AND channel_id=?", (session['user_id'], channel_id))
+    return redirect(url_for('view_channel', channel_id=channel_id))
+
+@app.route('/channel/<int:channel_id>/post', methods=['POST'])
+@login_required
+def post_in_channel(channel_id):
+    with get_db() as db:
+        channel = db.execute("SELECT * FROM channels WHERE id=? AND owner_id=?", (channel_id, session['user_id'])).fetchone()
+        if not channel: return "غير مصرح", 403
+        content = request.form['content'].strip()
+        if content:
+            db.execute("INSERT INTO posts (user_id,channel_id,content) VALUES (?,?,?)", (session['user_id'], channel_id, content))
+    return redirect(url_for('view_channel', channel_id=channel_id))
 
 @app.route('/channel/create', methods=['GET','POST'])
 @login_required
@@ -640,15 +736,18 @@ def create_channel():
         username = request.form['username'].strip().lstrip('@')
         desc = request.form.get('description','').strip()
         avatar = request.form.get('avatar','📡').strip()
+        cover_url = ''
+        if 'cover' in request.files:
+            saved = save_photo(request.files['cover'], f"ch_{username}")
+            if saved: cover_url = saved
         try:
             with get_db() as db:
-                db.execute("INSERT INTO channels (owner_id,name,username,description,avatar) VALUES (?,?,?,?,?)",
-                          (session['user_id'], name, username, desc, avatar))
+                db.execute("INSERT INTO channels (owner_id,name,username,description,avatar,cover_url) VALUES (?,?,?,?,?,?)",
+                          (session['user_id'], name, username, desc, avatar, cover_url))
             return redirect(url_for('channels'))
         except:
             return render_template('create_channel.html', error="اسم المستخدم مستخدم مسبقاً", **get_user_context())
-    ctx = get_user_context()
-    return render_template('create_channel.html', **ctx)
+    return render_template('create_channel.html', **get_user_context())
 
 # ─── Admin ───────────────────────────────────────────────────
 @app.route('/admin/login', methods=['GET','POST'])
@@ -737,6 +836,18 @@ def admin_broadcast():
             users = db.execute("SELECT id FROM users").fetchall()
             for u in users:
                 db.execute("INSERT INTO notifications (user_id,content) VALUES (?,?)", (u['id'], f"📢 {content}"))
+    return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/channel_post/<int:channel_id>', methods=['POST'])
+@admin_required
+def admin_channel_post(channel_id):
+    content = request.form.get('content','').strip()
+    if content:
+        with get_db() as db:
+            channel = db.execute("SELECT * FROM channels WHERE id=?", (channel_id,)).fetchone()
+            if channel:
+                db.execute("INSERT INTO posts (user_id,channel_id,content) VALUES (?,?,?)",
+                          (channel['owner_id'], channel_id, content))
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/logout')
