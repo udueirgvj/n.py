@@ -1,3 +1,4 @@
+
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 from flask_socketio import SocketIO, emit, join_room
 import sqlite3, bcrypt, os, uuid, base64
@@ -6,6 +7,7 @@ from functools import wraps
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "clipn-secret-2024")
+app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024  # 2MB max
 socketio = SocketIO(app, cors_allowed_origins="*")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin2024")
 DB = "clipn.db"
@@ -194,15 +196,18 @@ def get_user_context():
     return {'notif_count': notif_count, 'unread_dm': unread_dm}
 
 def save_photo(file_data, filename):
-    """Save photo as base64 data URL"""
+    """Save photo as base64 data URL - optimized for free tier"""
     if not file_data or file_data.filename == '':
         return None
-    data = file_data.read()
-    if not data: return None
-    ext = file_data.filename.rsplit('.', 1)[-1].lower()
-    mime = {'jpg':'jpeg','jpeg':'jpeg','png':'png','gif':'gif','webp':'webp'}.get(ext,'jpeg')
-    b64 = base64.b64encode(data).decode()
-    return f"data:image/{mime};base64,{b64}"
+    try:
+        data = file_data.read(500000)  # max 500KB
+        if not data or len(data) < 100: return None
+        ext = file_data.filename.rsplit(".", 1)[-1].lower() if "." in file_data.filename else "jpg"
+        mime = {"jpg":"jpeg","jpeg":"jpeg","png":"png","gif":"gif","webp":"webp"}.get(ext,"jpeg")
+        b64 = base64.b64encode(data).decode()
+        return f"data:image/{mime};base64,{b64}"
+    except:
+        return None
 
 # ─── Auth ────────────────────────────────────────────────────
 @app.route('/register', methods=['GET','POST'])
@@ -488,11 +493,14 @@ def settings_profile():
         new_username = request.form.get('username_edit','').strip().lstrip('@')
         photo_url = user['photo_url']
         # Handle photo upload
-        if 'photo' in request.files:
-            photo = request.files['photo']
-            saved = save_photo(photo, f"user_{session['user_id']}")
-            if saved:
-                photo_url = saved
+        try:
+            if 'photo' in request.files:
+                photo = request.files['photo']
+                saved = save_photo(photo, f"user_{session['user_id']}")
+                if saved:
+                    photo_url = saved
+        except:
+            pass  # Keep existing photo if upload fails
         try:
             final_username = new_username if new_username else user['username']
             with get_db() as db:
