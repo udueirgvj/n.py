@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+{% block title %}الدعم الفني - Clipn{% endblock %}
+{% block extra_css %}
+<style>
+.chat-box{height:55vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:12px;}
+.msg{max-width:78%;padding:10px 14px;border-radius:16px;font-size:0.9rem;line-height:1.5;}
+.msg-user{background:linear-gradient(135deg,var(--accent),var(--accent2));color:white;align-self:flex-end;border-bottom-left-radius:4px;}
+.msg-bot{background:var(--bg3);color:var(--text);align-self:flex-start;border-bottom-right-radius:4px;}
+.msg-time{font-size:0.7rem;opacity:0.6;margin-top:3px;}
+.transfer-btn{background:var(--bg3);border:1px solid var(--border);color:var(--text2);padding:8px 14px;border-radius:10px;font-size:0.8rem;cursor:pointer;font-family:'Tajawal',sans-serif;margin-top:8px;}
+</style>
+{% endblock %}
+{% block content %}
+<div class="container" style="padding-top:68px;">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+    <a href="/settings" style="color:var(--text2);text-decoration:none;font-size:1.3rem;">‹</a>
+    <h2 style="font-size:1.1rem;">💬 الدعم الفني</h2>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden;">
+    <div style="padding:12px 16px;background:var(--bg3);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">
+      <div class="avatar">🤖</div>
+      <div><strong>Clipn Support</strong><div style="font-size:0.75rem;color:#22c55e;">● نشط الآن</div></div>
+    </div>
+    <div class="chat-box" id="chat-box">
+      <div class="msg msg-bot">مرحباً! 👋 أنا مساعد Clipn. كيف يمكنني مساعدتك؟<div class="msg-time">الآن</div></div>
+      <div style="text-align:center;">
+        <button class="transfer-btn" onclick="transferToHuman()">🔄 تحويل لدعم بشري</button>
+      </div>
+    </div>
+    <form onsubmit="sendMsg(event)" style="padding:10px;border-top:1px solid var(--border);display:flex;gap:8px;">
+      <input id="msg-input" class="input" placeholder="اكتب رسالتك..." autocomplete="off"/>
+      <button type="submit" class="btn btn-primary btn-sm">↑</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const responses = {
+  'مرحبا': 'مرحباً بك! كيف يمكنني مساعدتك؟ 😊',
+  'مشكلة': 'أخبرني بالتفصيل عن المشكلة وسأحاول المساعدة.',
+  'كلمة المرور': 'يمكنك إعادة تعيين كلمة المرور من صفحة تسجيل الدخول.',
+  'حساب': 'ما المشكلة المتعلقة بحسابك؟',
+  'default': 'شكراً لتواصلك معنا! سأقوم بتحليل مشكلتك وتقديم المساعدة. هل يمكنك توضيح المشكلة أكثر؟'
+};
+function addMsg(text, isUser){
+  const box = document.getElementById('chat-box');
+  const d = document.createElement('div');
+  d.className = 'msg ' + (isUser?'msg-user':'msg-bot');
+  d.innerHTML = text + '<div class="msg-time">الآن</div>';
+  box.appendChild(d);
+  box.scrollTop = box.scrollHeight;
+}
+function sendMsg(e){
+  e.preventDefault();
+  const input = document.getElementById('msg-input');
+  const text = input.value.trim();
+  if(!text) return;
+  addMsg(text, true);
+  input.value = '';
+  setTimeout(()=>{
+    let reply = responses.default;
+    for(const [k,v] of Object.entries(responses)){
+      if(text.includes(k)){ reply=v; break; }
+    }
+    addMsg(reply, false);
+  }, 800);
+}
+function transferToHuman(){
+  addMsg('سيتم تحويلك الآن إلى أحد موظفي الدعم البشري. يرجى الانتظار... ⏳', false);
+}
+</script>
+{% endblock %}

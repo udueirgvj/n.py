@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block title %}مركز الخصوصية - Clipn{% endblock %}
+{% block content %}
+<div class="container">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+    <a href="/settings" style="color:var(--text2);text-decoration:none;font-size:1.3rem;">‹</a>
+    <h2 style="font-size:1.1rem;">🔐 مركز الخصوصية</h2>
+  </div>
+  <div class="card">
+    <h3 style="margin-bottom:12px;" class="glow-text">Clipn — حماية بياناتك</h3>
+    <p style="color:var(--text2);line-height:1.8;font-size:0.9rem;">
+      يستخدم Clipn تشفيراً من طرف إلى طرف لحماية رسائلك وبياناتك الشخصية. نحن لا نبيع بياناتك لأطراف ثالثة ولا نشاركها مع أي جهة خارجية دون موافقتك الصريحة.
+    </p>
+    <br/>
+    <h4 style="margin-bottom:8px;">🛡️ كيف نحمي بياناتك:</h4>
+    <ul style="color:var(--text2);font-size:0.9rem;line-height:2;padding-right:16px;">
+      <li>تشفير كلمات المرور باستخدام bcrypt</li>
+      <li>جلسات آمنة مع معرفات فريدة</li>
+      <li>إمكانية إنهاء أي جلسة من أي جهاز</li>
+      <li>التحقق بخطوتين لحماية إضافية</li>
+      <li>إشعارات فورية عند تسجيل دخول جديد</li>
+    </ul>
+    <br/>
+    <h4 style="margin-bottom:8px;">⚙️ الإعدادات المتاحة:</h4>
+    <ul style="color:var(--text2);font-size:0.9rem;line-height:2;padding-right:16px;">
+      <li>حساب خاص — تحكم في من يراك</li>
+      <li>حالة النشاط — إخفاء أو إظهار نشاطك</li>
+      <li>عناصر التحكم في الجمهور — تحديد الفئة العمرية</li>
+      <li>مشاركة الملف الشخصي — تحكم في رابطك</li>
+    </ul>
+    <br/>
+    <p style="color:var(--text2);font-size:0.85rem;">سياسة الخصوصية محدّثة في مارس 2026. للاستفسارات تواصل مع الدعم الفني.</p>
+  </div>
+</div>
+{% endblock %}

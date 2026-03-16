@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block title %}حساب مخترق - Clipn{% endblock %}
+{% block content %}
+<div class="container">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+    <a href="/help" style="color:var(--text2);text-decoration:none;font-size:1.3rem;">‹</a>
+    <h2 style="font-size:1.1rem;">⚠️ حسابي مخترق</h2>
+  </div>
+  {% if success %}<div class="alert alert-success">{{success}}</div>{% endif %}
+  <div class="card">
+    <p style="color:var(--text2);margin-bottom:16px;font-size:0.9rem;">مرحباً بك! سيتم إرسال رسالتك للدعم الفني وتحليل مشكلتك في أسرع وقت ممكن.</p>
+    <form method="POST" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:14px;">
+      <textarea name="message" class="input" placeholder="اشرح مشكلتك بشكل مفصل ودقيق..." rows="5" required></textarea>
+      <button type="submit" class="btn btn-primary" style="justify-content:center;">إرسال للدعم الفني 📤</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+{% block title %}{{other.display_name or other.username}} - Clipn{% endblock %}
+{% block extra_css %}
+<style>
+.chat-wrap { display:flex; flex-direction:column; height:calc(100vh - 56px); padding-top:56px; }
+.chat-header-bar {
+  position:fixed; top:56px; right:0; left:0; z-index:90;
+  background:rgba(10,10,15,0.97); backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--border);
+  padding:10px 16px; display:flex; align-items:center; gap:12px;
+}
+.chat-messages { flex:1; overflow-y:auto; padding:12px 16px; display:flex; flex-direction:column; gap:10px; margin-top:64px; margin-bottom:70px; }
+.msg { max-width:75%; padding:10px 14px; border-radius:16px; font-size:0.9rem; line-height:1.5; word-break:break-word; }
+.msg-mine { background:linear-gradient(135deg,var(--accent),var(--accent2)); color:white; align-self:flex-end; border-bottom-left-radius:4px; }
+.msg-other { background:var(--bg3); color:var(--text); align-self:flex-start; border-bottom-right-radius:4px; }
+.msg-time { font-size:0.68rem; opacity:0.65; margin-top:3px; }
+.chat-input-bar {
+  position:fixed; bottom:0; right:0; left:0; z-index:90;
+  background:rgba(10,10,15,0.97); backdrop-filter:blur(20px);
+  border-top:1px solid var(--border);
+  padding:10px 16px; display:flex; gap:10px; align-items:center;
+}
+</style>
+{% endblock %}
+{% block content %}
+<!-- Chat Header -->
+<div class="chat-header-bar">
+  <a href="/messages" style="color:var(--text2);text-decoration:none;font-size:1.4rem;padding:4px;">←</a>
+  <div class="avatar" style="width:38px;height:38px;font-size:1.1rem;flex-shrink:0;">
+    {% if other.photo_url %}<img src="{{other.photo_url}}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"/>
+    {% else %}{{other.avatar or '😊'}}{% endif %}
+  </div>
+  <div style="flex:1;">
+    <div style="font-weight:700;font-size:0.95rem;">{{other.display_name or other.username}}</div>
+    <div style="font-size:0.75rem;color:var(--text2);">@{{other.username}}</div>
+  </div>
+</div>
+
+<!-- Messages -->
+<div class="chat-messages" id="chat-box">
+  {% for m in msgs %}
+  <div class="msg {% if m.sender_id == session.user_id %}msg-mine{% else %}msg-other{% endif %}">
+    {{m.content}}
+    <div class="msg-time">{{m.created_at[11:16]}}</div>
+  </div>
+  {% else %}
+  <div style="text-align:center;color:var(--text2);margin:auto;padding:40px 20px;">
+    <div style="font-size:2.5rem;margin-bottom:10px;">💬</div>
+    <p>ابدأ محادثتك مع {{other.display_name or other.username}}</p>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Input -->
+<div class="chat-input-bar">
+  <form method="POST" action="/send_message/{{other.id}}" style="display:flex;gap:10px;width:100%;align-items:center;">
+    <input name="content" class="input" placeholder="اكتب رسالة..." autocomplete="off" required style="flex:1;"/>
+    <button type="submit" class="btn btn-primary btn-sm" style="padding:10px 16px;">➤</button>
+  </form>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const box = document.getElementById('chat-box');
+if(box) box.scrollTop = box.scrollHeight;
+</script>
+{% endblock %}
