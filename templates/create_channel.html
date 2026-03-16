@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% block title %}إنشاء قناة - Clipn{% endblock %}
+{% block content %}
+<div class="container">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+    <a href="/channels" style="color:var(--text2);text-decoration:none;font-size:1.3rem;">‹</a>
+    <h2 style="font-size:1.1rem;">📡 إنشاء قناة</h2>
+  </div>
+  {% if error %}<div class="alert alert-error">{{error}}</div>{% endif %}
+  <div class="card">
+    <form method="POST" style="display:flex;flex-direction:column;gap:14px;">
+      <div><label style="color:var(--text2);font-size:0.85rem;margin-bottom:6px;display:block;">إيموجي القناة</label>
+      <input name="avatar" class="input" value="📡" placeholder="📡"/></div>
+      <div><label style="color:var(--text2);font-size:0.85rem;margin-bottom:6px;display:block;">اسم القناة</label>
+      <input name="name" class="input" placeholder="اسم القناة" required/></div>
+      <div><label style="color:var(--text2);font-size:0.85rem;margin-bottom:6px;display:block;">معرف القناة (@)</label>
+      <input name="username" class="input" placeholder="@channel" required/></div>
+      <div><label style="color:var(--text2);font-size:0.85rem;margin-bottom:6px;display:block;">وصف القناة</label>
+      <textarea name="description" class="input" placeholder="وصف قصير..."></textarea></div>
+      <button type="submit" class="btn btn-primary" style="justify-content:center;">إنشاء القناة 🚀</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

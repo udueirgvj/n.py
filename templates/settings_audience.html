@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+{% block title %}التحكم في الجمهور - Clipn{% endblock %}
+{% block content %}
+<div class="container">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+    <a href="/settings" style="color:var(--text2);text-decoration:none;font-size:1.3rem;">‹</a>
+    <h2 style="font-size:1.1rem;">👥 عناصر التحكم في الجمهور</h2>
+  </div>
+  <form method="POST">
+  <div class="card" style="padding:0;overflow:hidden;">
+    <div class="section-title">الفئة العمرية للمحتوى</div>
+    {% for val, label, desc in [('all','الجميع','محتوى مناسب لجميع الأعمار'),('18+','18+ فقط','محتوى للبالغين فقط'),('under18','أقل من 18','محتوى موجه للشباب')] %}
+    <label style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);cursor:pointer;">
+      <div><div style="font-weight:600;">{{label}}</div><div style="color:var(--text2);font-size:0.8rem;">{{desc}}</div></div>
+      <input type="radio" name="age_restriction" value="{{val}}" {% if user.age_restriction==val %}checked{% endif %} style="accent-color:var(--accent);width:18px;height:18px;"/>
+    </label>
+    {% endfor %}
+  </div>
+  <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;">حفظ ✅</button>
+  </form>
+</div>
+{% endblock %}

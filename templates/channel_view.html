@@ -1,0 +1,101 @@
+{% extends 'base.html' %}
+{% block title %}{{channel.name}} - Clipn{% endblock %}
+{% block extra_css %}
+<style>
+.channel-cover { height:160px; background:linear-gradient(135deg,var(--accent),var(--pink)); border-radius:16px 16px 0 0; overflow:hidden; position:relative; }
+.channel-cover img { width:100%;height:100%;object-fit:cover; }
+.channel-info { padding:16px; background:var(--bg2); border-radius:0 0 16px 16px; border:1px solid var(--border); border-top:none; }
+.verified-badge { color:#3b82f6; font-size:1rem; }
+.sub-btn { position:fixed; bottom:75px; left:50%; transform:translateX(-50%); width:calc(100% - 32px); max-width:568px; z-index:50; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="container" style="padding-bottom:140px;">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+    <a href="/channels" style="color:var(--text2);text-decoration:none;font-size:1.3rem;">‹</a>
+    <h2 style="font-size:1rem;">القناة</h2>
+  </div>
+
+  <!-- Channel Header -->
+  <div style="margin-bottom:16px;border-radius:16px;overflow:hidden;border:1px solid var(--border);">
+    <div class="channel-cover">
+      {% if channel.cover_url %}
+      <img src="{{channel.cover_url}}" alt="cover"/>
+      {% endif %}
+      <div style="position:absolute;inset:0;background:rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;font-size:3rem;">
+        {{channel.avatar}}
+      </div>
+    </div>
+    <div class="channel-info">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <span style="font-size:1.2rem;font-weight:900;">{{channel.name}}</span>
+        {% if channel.is_verified %}<span class="verified-badge">✓</span>{% endif %}
+      </div>
+      <div style="color:var(--text2);font-size:0.85rem;margin-bottom:8px;">@{{channel.username}}</div>
+      {% if channel.description %}
+      <div style="font-size:0.9rem;margin-bottom:10px;color:var(--text2);">{{channel.description}}</div>
+      {% endif %}
+      <div style="display:flex;gap:16px;">
+        <div style="font-size:0.85rem;">
+          <strong style="color:var(--accent2);">{{channel.subscribers|format_number}}</strong>
+          <span style="color:var(--text2);"> مشترك</span>
+        </div>
+        <div style="font-size:0.85rem;">
+          <strong>{{posts|length}}</strong>
+          <span style="color:var(--text2);"> منشور</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Posts -->
+  {% for post in posts %}
+  <div class="card fade-up">
+    <div class="post-header">
+      <div class="avatar" style="background:linear-gradient(135deg,var(--accent),var(--pink));font-size:1.2rem;">{{channel.avatar}}</div>
+      <div class="post-meta">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="font-weight:700;">{{channel.name}}</span>
+          {% if channel.is_verified %}<span class="verified-badge">✓</span>{% endif %}
+        </div>
+        <div class="post-time">{{post.created_at[5:16]}}</div>
+      </div>
+    </div>
+    <div class="post-content">{{post.content}}</div>
+    <div class="post-actions">
+      <button class="action-btn {% if post.user_liked %}liked{% endif %}" onclick="likePost({{post.id}},this)">
+        ❤️ <span id="lc-{{post.id}}">{{post.like_count}}</span>
+      </button>
+    </div>
+  </div>
+  {% else %}
+  <div class="card" style="text-align:center;color:var(--text2);padding:40px;">
+    <div style="font-size:3rem;margin-bottom:12px;">📡</div>
+    <p>لا توجد منشورات بعد</p>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Subscribe Button -->
+<div class="sub-btn">
+  {% if is_subscribed %}
+  <form method="POST" action="/channel/{{channel.id}}/unsubscribe">
+    <button type="submit" class="btn btn-outline" style="width:100%;justify-content:center;padding:14px;font-size:1rem;">✅ مشترك</button>
+  </form>
+  {% else %}
+  <form method="POST" action="/channel/{{channel.id}}/subscribe">
+    <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;padding:14px;font-size:1rem;">➕ انضمام</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function likePost(id,btn){
+  fetch('/like/'+id,{method:'POST'}).then(r=>r.json()).then(d=>{
+    btn.classList.toggle('liked',d.liked);
+    document.getElementById('lc-'+id).textContent=d.count;
+  });
+}
+</script>
+{% endblock %}

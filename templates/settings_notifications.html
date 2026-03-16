@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block title %}الشعارات - Clipn{% endblock %}
+{% block content %}
+<div class="container">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+    <a href="/settings" style="color:var(--text2);text-decoration:none;font-size:1.3rem;">‹</a>
+    <h2 style="font-size:1.1rem;">🔔 الشعارات</h2>
+  </div>
+  <form method="POST">
+  <div class="card" style="padding:0;overflow:hidden;">
+    <div class="section-title">تفعيل / إيقاف الشعارات</div>
+
+    {% set items = [
+      ('notif_likes','❤️ الإعجابات','إشعار عند إعجاب أحدهم بمنشورك'),
+      ('notif_follows','👤 المتابعة','إشعار عند متابعة شخص لك'),
+      ('notif_visits','👁️ زيارة الملف','إشعار عند زيارة ملفك الشخصي'),
+      ('notif_reposts','🔁 إعادة النشر','إشعار عند إعادة نشر منشوراتك'),
+      ('notif_messages','💬 طلب مراسلة','إشعار عند وصول رسالة جديدة'),
+      ('notif_channels','📡 القنوات والمجموعات','إشعارات داخل القنوات والمجموعات')
+    ] %}
+
+    {% for field, title, desc in items %}
+    <div class="settings-row">
+      <div class="settings-row-info">
+        <div class="settings-row-title">{{title}}</div>
+        <div class="settings-row-desc">{{desc}}</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" name="{{field}}" {% if user[field] %}checked{% endif %}/>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    {% endfor %}
+  </div>
+  <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;">حفظ ✅</button>
+  </form>
+</div>
+{% endblock %}

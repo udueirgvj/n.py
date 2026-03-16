@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Clipn - تسجيل الدخول</title>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;900&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Tajawal',sans-serif;background:#0a0a0f;color:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+.wrap{width:100%;max-width:400px;}
+.logo{text-align:center;margin-bottom:32px;}
+.logo h1{font-size:2.5rem;font-weight:900;background:linear-gradient(135deg,#a855f7,#ec4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.logo p{color:#94a3b8;margin-top:6px;font-size:0.95rem;}
+.card{background:#12121a;border:1px solid rgba(124,58,237,0.2);border-radius:20px;padding:28px;}
+.input{width:100%;padding:13px 16px;border-radius:12px;border:1px solid rgba(124,58,237,0.2);background:#1a1a26;color:#f1f5f9;font-family:'Tajawal',sans-serif;font-size:0.95rem;outline:none;margin-bottom:12px;}
+.input:focus{border-color:#7c3aed;}
+.btn{width:100%;padding:14px;border-radius:12px;border:none;background:linear-gradient(135deg,#7c3aed,#a855f7);color:white;font-family:'Tajawal',sans-serif;font-size:1rem;font-weight:700;cursor:pointer;margin-top:4px;}
+.error{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#fca5a5;padding:10px 14px;border-radius:10px;margin-bottom:14px;font-size:0.88rem;}
+.link{text-align:center;margin-top:16px;color:#94a3b8;font-size:0.9rem;}
+.link a{color:#a855f7;}
+.two-fa{display:none;margin-top:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo">
+    <h1>Clipn</h1>
+    <p>تواصل مع العالم</p>
+  </div>
+  <div class="card">
+    {% if error %}<div class="error">{{error}}</div>{% endif %}
+    <form method="POST">
+      <input name="username" class="input" placeholder="اسم المستخدم" required autocomplete="username"/>
+      <input name="password" type="password" class="input" placeholder="كلمة المرور" required autocomplete="current-password"/>
+      <div class="two-fa" id="two-fa-field">
+        <input name="two_fa_code" class="input" placeholder="رمز التحقق بخطوتين (اختياري)"/>
+      </div>
+      <button type="submit" class="btn">دخول →</button>
+    </form>
+    <div class="link" style="margin-top:12px;">
+      <a href="/forgot-password" style="color:#94a3b8;font-size:0.85rem;">نسيت كلمة المرور؟</a>
+    </div>
+  </div>
+  <div class="link">
+    ليس لديك حساب؟ <a href="/register">سجّل الآن</a>
+  </div>
+</div>
+</body>
+</html>

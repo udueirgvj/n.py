@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% block title %}مشاركة الملف - Clipn{% endblock %}
+{% block content %}
+<div class="container">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+    <a href="/settings" style="color:var(--text2);text-decoration:none;font-size:1.3rem;">‹</a>
+    <h2 style="font-size:1.1rem;">🔗 مشاركة الملف الشخصي</h2>
+  </div>
+  <div class="card" style="text-align:center;padding:30px;">
+    <div style="font-size:3rem;margin-bottom:16px;">🔗</div>
+    <p style="color:var(--text2);margin-bottom:16px;font-size:0.9rem;">رابط ملفك الشخصي:</p>
+    <div style="background:var(--bg3);padding:14px;border-radius:12px;border:1px solid var(--border);margin-bottom:16px;word-break:break-all;font-size:0.9rem;">{{link}}</div>
+    <button onclick="copyLink()" class="btn btn-primary" style="width:100%;justify-content:center;">📋 نسخ الرابط</button>
+    <div style="margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+      <a href="https://wa.me/?text={{link}}" target="_blank" class="btn btn-outline btn-sm">واتساب</a>
+      <a href="https://t.me/share/url?url={{link}}" target="_blank" class="btn btn-outline btn-sm">تيليغرام</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function copyLink(){
+  navigator.clipboard.writeText('{{link}}').then(()=>alert('تم النسخ! ✅'));
+}
+</script>
+{% endblock %}
