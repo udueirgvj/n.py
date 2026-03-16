@@ -138,10 +138,6 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
-    # Create official Clipn channel if not exists
-    _create_clipn_channel()
-
-init_db()
 
 def _create_clipn_channel():
     with get_db() as db:
@@ -159,6 +155,10 @@ def _create_clipn_channel():
                               VALUES (?,?,?,?,?,1,789000)""",
                           (admin['id'], 'Clipn', CLIPN_OWNER_USERNAME,
                            'القناة الرسمية لتطبيق Clipn 🚀', '🌐'))
+
+
+init_db()
+_create_clipn_channel()
 
 def login_required(f):
     @wraps(f)
@@ -865,4 +865,3 @@ def handle_message(data):
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=5000)
-
