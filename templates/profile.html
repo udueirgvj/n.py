@@ -38,7 +38,7 @@
       <button class="btn btn-primary" id="follow-btn" onclick="toggleFollow({{user.id}})" style="flex:1;justify-content:center;">
         {% if is_following %}✅ تتابعه{% else %}➕ متابعة{% endif %}
       </button>
-      <a href="/messages/{{user.id}}" class="btn btn-outline" style="flex:1;justify-content:center;">💬 رسالة</a>
+      <a href="/messages/{{user._id}}" class="btn btn-outline" style="flex:1;justify-content:center;">💬 رسالة</a>
     </div>
     {% endif %}
   </div>
