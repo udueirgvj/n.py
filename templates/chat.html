@@ -2,28 +2,20 @@
 {% block title %}{{other.display_name or other.username}} - Clipn{% endblock %}
 {% block extra_css %}
 <style>
-.chat-wrap { display:flex; flex-direction:column; height:calc(100vh - 56px); padding-top:56px; }
-.chat-header-bar {
-  position:fixed; top:56px; right:0; left:0; z-index:90;
-  background:rgba(10,10,15,0.97); backdrop-filter:blur(20px);
-  border-bottom:1px solid var(--border);
-  padding:10px 16px; display:flex; align-items:center; gap:12px;
-}
-.chat-messages { flex:1; overflow-y:auto; padding:12px 16px; display:flex; flex-direction:column; gap:10px; margin-top:64px; margin-bottom:70px; }
-.msg { max-width:75%; padding:10px 14px; border-radius:16px; font-size:0.9rem; line-height:1.5; word-break:break-word; }
-.msg-mine { background:linear-gradient(135deg,var(--accent),var(--accent2)); color:white; align-self:flex-end; border-bottom-left-radius:4px; }
-.msg-other { background:var(--bg3); color:var(--text); align-self:flex-start; border-bottom-right-radius:4px; }
-.msg-time { font-size:0.68rem; opacity:0.65; margin-top:3px; }
-.chat-input-bar {
-  position:fixed; bottom:0; right:0; left:0; z-index:90;
-  background:rgba(10,10,15,0.97); backdrop-filter:blur(20px);
-  border-top:1px solid var(--border);
-  padding:10px 16px; display:flex; gap:10px; align-items:center;
-}
+.chat-wrap{display:flex;flex-direction:column;height:calc(100vh - 56px);padding-top:56px;}
+.chat-header-bar{position:fixed;top:56px;right:0;left:0;z-index:90;background:rgba(10,10,15,0.97);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:12px;}
+.chat-messages{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px;margin-top:64px;margin-bottom:70px;}
+.msg{max-width:75%;padding:10px 14px;border-radius:16px;font-size:0.9rem;line-height:1.5;word-break:break-word;}
+.msg-mine{background:linear-gradient(135deg,var(--accent),var(--accent2));color:white;align-self:flex-end;border-bottom-left-radius:4px;}
+.msg-other{background:var(--bg3);color:var(--text);align-self:flex-start;border-bottom-right-radius:4px;}
+.msg-time{font-size:0.68rem;opacity:0.65;margin-top:3px;}
+.msg-img{max-width:200px;border-radius:10px;cursor:pointer;margin-top:6px;}
+.chat-input-bar{position:fixed;bottom:0;right:0;left:0;z-index:90;background:rgba(10,10,15,0.97);backdrop-filter:blur(20px);border-top:1px solid var(--border);padding:8px 12px;}
+.img-preview-bar{display:none;padding:6px 0;margin-bottom:4px;}
+.img-preview-bar img{height:60px;border-radius:8px;}
 </style>
 {% endblock %}
 {% block content %}
-<!-- Chat Header -->
 <div class="chat-header-bar">
   <a href="/messages" style="color:var(--text2);text-decoration:none;font-size:1.4rem;padding:4px;">←</a>
   <div class="avatar" style="width:38px;height:38px;font-size:1.1rem;flex-shrink:0;">
@@ -36,32 +28,64 @@
   </div>
 </div>
 
-<!-- Messages -->
 <div class="chat-messages" id="chat-box">
   {% for m in msgs %}
   <div class="msg {% if m.sender_id == session.user_id %}msg-mine{% else %}msg-other{% endif %}">
-    {{m.content}}
-    <div class="msg-time">{{m.created_at[11:16]}}</div>
+    {% if m.content %}{{m.content}}{% endif %}
+    {% if m.image_url %}
+    <img src="{{m.image_url}}" class="msg-img" onclick="openImg(this.src)"/>
+    {% endif %}
+    <div class="msg-time">{{m.created_at[11:16] if m.created_at else ''}}</div>
   </div>
   {% else %}
   <div style="text-align:center;color:var(--text2);margin:auto;padding:40px 20px;">
     <div style="font-size:2.5rem;margin-bottom:10px;">💬</div>
-    <p>ابدأ محادثتك مع {{other.display_name or other.username}}</p>
+    <p>ابدأ محادثتك</p>
   </div>
   {% endfor %}
 </div>
 
-<!-- Input -->
 <div class="chat-input-bar">
-  <form method="POST" action="/send_message/{{other.id}}" style="display:flex;gap:10px;width:100%;align-items:center;">
-    <input name="content" class="input" placeholder="اكتب رسالة..." autocomplete="off" required style="flex:1;"/>
-    <button type="submit" class="btn btn-primary btn-sm" style="padding:10px 16px;">➤</button>
+  <div class="img-preview-bar" id="img-preview-bar">
+    <img id="chat-preview-img"/>
+    <button onclick="clearChatImg()" style="background:#ef4444;border:none;color:white;border-radius:6px;padding:2px 6px;font-size:0.7rem;cursor:pointer;margin-right:6px;">✕</button>
+  </div>
+  <form method="POST" action="/send_message/{{other._id}}" enctype="multipart/form-data" style="display:flex;gap:8px;align-items:center;">
+    <label style="cursor:pointer;color:var(--text2);font-size:1.3rem;padding:4px;">
+      🖼️
+      <input type="file" name="image" accept="image/*" style="display:none;" onchange="previewChatImg(this)"/>
+    </label>
+    <input name="content" id="msg-input" class="input" placeholder="اكتب رسالة..." autocomplete="off" style="flex:1;"/>
+    <button type="submit" class="btn btn-primary btn-sm" style="padding:10px 14px;">➤</button>
   </form>
+</div>
+
+<div id="img-modal" onclick="closeImg()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:500;align-items:center;justify-content:center;">
+  <img id="modal-img" style="max-width:95%;max-height:90vh;object-fit:contain;border-radius:10px;"/>
 </div>
 {% endblock %}
 {% block scripts %}
 <script>
-const box = document.getElementById('chat-box');
-if(box) box.scrollTop = box.scrollHeight;
+const box=document.getElementById('chat-box');
+if(box) box.scrollTop=box.scrollHeight;
+function previewChatImg(input){
+  if(input.files&&input.files[0]){
+    const reader=new FileReader();
+    reader.onload=e=>{
+      document.getElementById('chat-preview-img').src=e.target.result;
+      document.getElementById('img-preview-bar').style.display='block';
+    };
+    reader.readAsDataURL(input.files[0]);
+  }
+}
+function clearChatImg(){
+  document.getElementById('img-preview-bar').style.display='none';
+  document.querySelector('input[name=image]').value='';
+}
+function openImg(src){
+  document.getElementById('modal-img').src=src;
+  document.getElementById('img-modal').style.display='flex';
+}
+function closeImg(){document.getElementById('img-modal').style.display='none';}
 </script>
 {% endblock %}
