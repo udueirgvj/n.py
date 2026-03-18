@@ -14,51 +14,50 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin2024")
 FB_URL = "https://tttrt-b8c5a-default-rtdb.asia-southeast1.firebasedatabase.app"
 FB_KEY = os.environ.get("FIREBASE_SECRET", "")  # Database secret key
 
+def _fb_params():
+    return {"auth": FB_KEY} if FB_KEY else {}
+
 def fb_get(path):
-    url = f"{FB_URL}/{path}.json"
-    if FB_KEY: url += f"?auth={FB_KEY}"
-    r = http.get(url, timeout=10)
-    return r.json() if r.status_code == 200 else None
+    try:
+        r = http.get(f"{FB_URL}/{path}.json", params=_fb_params(), timeout=10)
+        return r.json() if r.status_code == 200 else None
+    except: return None
 
 def fb_set(path, data):
-    url = f"{FB_URL}/{path}.json"
-    if FB_KEY: url += f"?auth={FB_KEY}"
-    r = http.put(url, json=data, timeout=10)
-    return r.json()
+    try:
+        r = http.put(f"{FB_URL}/{path}.json", json=data, params=_fb_params(), timeout=10)
+        return r.json()
+    except: return None
 
 def fb_push(path, data):
-    url = f"{FB_URL}/{path}.json"
-    if FB_KEY: url += f"?auth={FB_KEY}"
-    r = http.post(url, json=data, timeout=10)
-    return r.json()
+    try:
+        r = http.post(f"{FB_URL}/{path}.json", json=data, params=_fb_params(), timeout=10)
+        return r.json()
+    except: return None
 
 def fb_update(path, data):
-    url = f"{FB_URL}/{path}.json"
-    if FB_KEY: url += f"?auth={FB_KEY}"
-    r = http.patch(url, json=data, timeout=10)
-    return r.json()
+    try:
+        r = http.patch(f"{FB_URL}/{path}.json", json=data, params=_fb_params(), timeout=10)
+        return r.json()
+    except: return None
 
 def fb_delete(path):
-    url = f"{FB_URL}/{path}.json"
-    if FB_KEY: url += f"?auth={FB_KEY}"
-    http.delete(url, timeout=10)
+    try:
+        http.delete(f"{FB_URL}/{path}.json", params=_fb_params(), timeout=10)
+    except: pass
 
 def fb_query(path, order_by=None, limit=50):
-    url = f"{FB_URL}/{path}.json"
-    params = {}
-    if FB_KEY: params['auth'] = FB_KEY
-    if order_by:
-        params['orderBy'] = f'"{order_by}"'
-        params['limitToLast'] = limit
-    r = http.get(url, params=params, timeout=10)
-    data = r.json() if r.status_code == 200 else None
-    if not data or not isinstance(data, dict): return []
-    items = []
-    for k, v in data.items():
-        if isinstance(v, dict):
-            v['_id'] = k
-            items.append(v)
-    return items
+    try:
+        r = http.get(f"{FB_URL}/{path}.json", params=_fb_params(), timeout=10)
+        data = r.json() if r.status_code == 200 else None
+        if not data or not isinstance(data, dict): return []
+        items = []
+        for k, v in data.items():
+            if isinstance(v, dict):
+                v['_id'] = k
+                items.append(v)
+        return items
+    except: return []
 
 # â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @app.template_filter('format_number')
@@ -298,6 +297,8 @@ def home():
         comments = fb_get(f'comments/{p["_id"]}') or {}
         p['comment_count'] = len(comments) if isinstance(comments, dict) else 0
         p['id'] = p['_id']
+        # Track view
+        fb_update(f'posts/{p["_id"]}', {'views': (p.get('views') or 0) + 1})
         posts.append(p)
 
     stories_data = fb_query('stories')
@@ -318,14 +319,21 @@ def home():
 @app.route('/post', methods=['POST'])
 @login_required
 def create_post():
-    content = request.form['content'].strip()
-    if content:
+    content = request.form.get('content','').strip()
+    image_url = ''
+    try:
+        if 'image' in request.files:
+            saved = save_photo(request.files['image'])
+            if saved: image_url = saved
+    except: pass
+    if content or image_url:
         import re
-        tags = ' '.join(re.findall(r'#\w+', content))
+        tags = ' '.join(re.findall(r'#\w+', content)) if content else ''
         fb_push('posts', {
             'user_id': session['user_id'],
             'content': content,
             'hashtags': tags,
+            'image_url': image_url,
             'created_at': now()
         })
     return redirect(url_for('home'))
@@ -536,13 +544,20 @@ def chat(other_id):
 @app.route('/send_message/<other_id>', methods=['POST'])
 @login_required
 def send_message(other_id):
-    content = request.form['content'].strip()
-    if content:
+    content = request.form.get('content','').strip()
+    image_url = ''
+    try:
+        if 'image' in request.files:
+            saved = save_photo(request.files['image'])
+            if saved: image_url = saved
+    except: pass
+    if content or image_url:
         conv_id = '_'.join(sorted([session['user_id'], other_id]))
         fb_push(f'messages/{conv_id}', {
             'sender_id': session['user_id'],
             'receiver_id': other_id,
             'content': content,
+            'image_url': image_url,
             'is_read': False,
             'created_at': now()
         })
@@ -905,6 +920,156 @@ def admin_broadcast():
             fb_push(f'notifications/{u["_id"]}', {'content': f"ðŸ“¢ {content}", 'is_read': False, 'created_at': now()})
     return redirect(url_for('admin_dashboard'))
 
+
+@app.route("/view/<post_id>", methods=["POST"])
+@login_required
+def track_view(post_id):
+    views = fb_get(f"views/{post_id}") or {}
+    uid = session["user_id"]
+    if uid not in views:
+        fb_set(f"views/{post_id}/{uid}", True)
+    count = len(fb_get(f"views/{post_id}") or {})
+    return jsonify({"count": count})
+
+@app.route("/admin/boost", methods=["POST"])
+@admin_required
+def admin_boost():
+    boost_type = request.form.get("boost_type")
+    target = request.form.get("target","").strip().lstrip("@")
+    amount = int(request.form.get("amount", 0))
+    boost_msg = None
+
+    user = get_user_by_username(target)
+    if not user:
+        # try by ID
+        user = get_user_by_id(target)
+
+    if not user:
+        boost_msg = "âŒ Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯"
+    elif boost_type == "followers":
+        current = int(user.get("fake_followers", 0))
+        fb_update(f"users/{user['_id']}", {"fake_followers": current + amount})
+        boost_msg = f"âœ… ØªÙ… Ø¥Ø¶Ø§ÙØ© {amount} Ù…ØªØ§Ø¨Ø¹ Ù„Ù€ @{user['username']}"
+    elif boost_type == "views":
+        current = int(user.get("fake_views", 0))
+        fb_update(f"users/{user['_id']}", {"fake_views": current + amount})
+        boost_msg = f"âœ… ØªÙ… Ø¥Ø¶Ø§ÙØ© {amount} Ù…Ø´Ø§Ù‡Ø¯Ø© Ù„Ù€ @{user['username']}"
+    elif boost_type == "likes":
+        current = int(user.get("fake_likes", 0))
+        fb_update(f"users/{user['_id']}", {"fake_likes": current + amount})
+        boost_msg = f"âœ… ØªÙ… Ø¥Ø¶Ø§ÙØ© {amount} Ø¥Ø¹Ø¬Ø§Ø¨ Ù„Ù€ @{user['username']}"
+
+    # Re-render admin page with boost_msg
+    users = fb_query("users")
+    posts = fb_query("posts")
+    support_msgs = fb_query("support_messages")
+    stats = {"users": len(users), "posts": len(posts), "messages": 0, "active": 0}
+    return render_template("admin.html", users=users, posts=posts, messages=[], support_msgs=support_msgs, stats=stats, boost_msg=boost_msg)
+
+@app.route("/admin/verify-item", methods=["POST"])
+@admin_required
+def admin_verify_item():
+    verify_type = request.form.get("verify_type")
+    target = request.form.get("target","").strip().lstrip("@")
+    verify_msg = None
+
+    if verify_type == "user":
+        user = get_user_by_username(target) or get_user_by_id(target)
+        if user:
+            fb_update(f"users/{user['_id']}", {"is_verified": True})
+            verify_msg = f"âœ… ØªÙ… ØªÙˆØ«ÙŠÙ‚ @{user['username']}"
+        else:
+            verify_msg = "âŒ Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯"
+    elif verify_type == "channel":
+        channels = fb_query("channels")
+        ch = next((c for c in channels if c.get("username") == target or c.get("_id") == target), None)
+        if ch:
+            fb_update(f"channels/{ch['_id']}", {"is_verified": True})
+            verify_msg = f"âœ… ØªÙ… ØªÙˆØ«ÙŠÙ‚ Ù‚Ù†Ø§Ø© {ch['name']}"
+        else:
+            verify_msg = "âŒ Ø§Ù„Ù‚Ù†Ø§Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©"
+
+    users = fb_query("users")
+    posts = fb_query("posts")
+    support_msgs = fb_query("support_messages")
+    stats = {"users": len(users), "posts": len(posts), "messages": 0, "active": 0}
+    return render_template("admin.html", users=users, posts=posts, messages=[], support_msgs=support_msgs, stats=stats, verify_msg=verify_msg)
+
+@app.route('/admin/boost', methods=['POST'])
+@admin_required
+def admin_boost():
+    boost_type = request.form.get('boost_type','followers')
+    target = request.form.get('target','').strip()
+    amount = int(request.form.get('amount', 0))
+    boost_msg = None
+
+    if target and amount > 0:
+        # Find user
+        users = fb_query('users')
+        user = next((u for u in users if u.get('username') == target or u.get('_id') == target), None)
+        if user:
+            uid = user['_id']
+            if boost_type == 'followers':
+                for i in range(min(amount, 10000)):
+                    fake_id = f'fake_{uid}_{i}_{now()[:10]}'
+                    fb_set(f'follows/{fake_id}', {'follower_id': fake_id, 'following_id': uid, 'created_at': now()})
+                boost_msg = f'ØªÙ… Ø¥Ø¶Ø§ÙØ© {amount} Ù…ØªØ§Ø¨Ø¹ Ù„Ù€ @{user["username"]} âœ…'
+            elif boost_type == 'views':
+                posts_data = fb_query('posts')
+                user_posts = [p for p in posts_data if p.get('user_id') == uid]
+                for p in user_posts[:10]:
+                    current = p.get('views', 0) or 0
+                    fb_update(f'posts/{p["_id"]}', {'views': current + amount})
+                boost_msg = f'ØªÙ… Ø¥Ø¶Ø§ÙØ© {amount} Ù…Ø´Ø§Ù‡Ø¯Ø© Ù„Ù…Ù†Ø´ÙˆØ±Ø§Øª @{user["username"]} âœ…'
+            elif boost_type == 'likes':
+                posts_data = fb_query('posts')
+                user_posts = [p for p in posts_data if p.get('user_id') == uid]
+                for p in user_posts[:5]:
+                    for i in range(min(amount, 1000)):
+                        fb_set(f'likes/{p["_id"]}/fake_{i}_{uid}', True)
+                boost_msg = f'ØªÙ… Ø¥Ø¶Ø§ÙØ© {amount} Ø¥Ø¹Ø¬Ø§Ø¨ Ù„Ù…Ù†Ø´ÙˆØ±Ø§Øª @{user["username"]} âœ…'
+        else:
+            boost_msg = 'Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯ âŒ'
+
+    users = fb_query('users')
+    posts = fb_query('posts')
+    support_msgs = fb_query('support_messages')
+    stats = {'users': len(users), 'posts': len(posts), 'messages': 0, 'active': 0}
+    return render_template('admin.html', users=users, posts=posts, messages=[], support_msgs=support_msgs, stats=stats, boost_msg=boost_msg)
+
+@app.route('/admin/verify_by_username', methods=['POST'])
+@admin_required
+def admin_verify_by_username():
+    target = request.form.get('target','').strip()
+    target_type = request.form.get('target_type','user')
+    verify_msg = None
+
+    if target:
+        if target_type == 'user':
+            users = fb_query('users')
+            user = next((u for u in users if u.get('username') == target or u.get('_id') == target), None)
+            if user:
+                new_status = not user.get('is_verified', False)
+                fb_update(f'users/{user["_id"]}', {'is_verified': new_status})
+                verify_msg = f'ØªÙ… {"ØªÙˆØ«ÙŠÙ‚" if new_status else "Ø¥Ù„ØºØ§Ø¡ ØªÙˆØ«ÙŠÙ‚"} @{user["username"]} âœ…'
+            else:
+                verify_msg = 'Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯ âŒ'
+        else:
+            channels = fb_query('channels')
+            channel = next((c for c in channels if c.get('username') == target or c.get('_id') == target), None)
+            if channel:
+                new_status = not channel.get('is_verified', False)
+                fb_update(f'channels/{channel["_id"]}', {'is_verified': new_status})
+                verify_msg = f'ØªÙ… {"ØªÙˆØ«ÙŠÙ‚" if new_status else "Ø¥Ù„ØºØ§Ø¡ ØªÙˆØ«ÙŠÙ‚"} Ù‚Ù†Ø§Ø© {channel["name"]} âœ…'
+            else:
+                verify_msg = 'Ø§Ù„Ù‚Ù†Ø§Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø© âŒ'
+
+    users = fb_query('users')
+    posts = fb_query('posts')
+    support_msgs = fb_query('support_messages')
+    stats = {'users': len(users), 'posts': len(posts), 'messages': 0, 'active': 0}
+    return render_template('admin.html', users=users, posts=posts, messages=[], support_msgs=support_msgs, stats=stats, verify_msg=verify_msg)
+
 @app.route('/admin/logout')
 def admin_logout():
     session.pop('is_admin', None)
@@ -920,4 +1085,3 @@ def handle_message(data):
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=5000)
-
